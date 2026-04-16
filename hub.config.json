@@ -1,0 +1,26 @@
+{
+  "name": "CAMBIAR: Nombre de la App",
+  "description": "CAMBIAR: Descripcion corta de lo que hace",
+  "type": "frontend",
+  "capabilities": ["frontend"],
+  "visibility": "public",
+  "owner": "CAMBIAR@comunidadfeliz.cl",
+  "publicAuth": false,
+  "supabase": {
+    "rls_enabled": true,
+    "migration": "migrations/001_initial.sql"
+  },
+  "endpoints": {
+    "health": "/api/health",
+    "metrics_menu": "/api/metrics/menu",
+    "metrics": "/api/metrics"
+  },
+  "env_required": [],
+  "sidebar_nav": [
+    {
+      "label": "Inicio",
+      "path": "/",
+      "icon": "home"
+    }
+  ]
+}

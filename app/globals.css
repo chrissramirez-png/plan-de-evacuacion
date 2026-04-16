@@ -1,0 +1,84 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Verde de marca */
+  --color-cf-green: #4cbf8c;
+  --color-cf-green-text: #00a27f;
+  --color-cf-green-hover: #50d6a5;
+  --color-cf-green-light: #c6f7e1;
+
+  /* Texto */
+  --color-cf-text-primary: #232942;
+  --color-cf-text-secondary: #4c516d;
+  --color-cf-text-tertiary: #a9acb9;
+  --color-cf-text-disabled: #a9acb9;
+  --color-cf-text-on-color: #ffffff;
+
+  /* Aliases para compatibilidad */
+  --color-cf-brand-text: #232942;
+  --color-cf-brand-text-2: #4c516d;
+
+  /* Neutros UI */
+  --color-cf-border: #c4c6cf;
+  --color-cf-border-form: #828599;
+  --color-cf-bg-gray: #f2f3f4;
+  --color-cf-bg-page: #f8f9fa;
+  --color-cf-bg-white: #ffffff;
+  --color-cf-bg-hover: #f2f3f4;
+  --color-cf-bg-hover-alt: #edeef0;
+  --color-cf-tooltip: #232942;
+
+  /* Azul */
+  --color-cf-blue: #005fc5;
+  --color-cf-blue-hover: #5a8cf9;
+  --color-cf-blue-disabled: #a7c2fb;
+  --color-cf-blue-light: #d1dffd;
+  --color-cf-blue-bg: #eef3fe;
+
+  /* Alertas */
+  --color-cf-warning: #ffc000;
+  --color-cf-warning-secondary: #ffd450;
+  --color-cf-warning-bg: #fffab9;
+
+  /* Errores */
+  --color-cf-error: #dc4b5c;
+  --color-cf-error-hover: #ff6b75;
+  --color-cf-error-click: #be0022;
+  --color-cf-error-secondary: #ffa5ab;
+  --color-cf-error-bg: #ffe9ea;
+
+  /* Sidebar admin */
+  --color-cf-sidebar: #2d3748;
+  --color-cf-sidebar-active: #4cbf8c;
+  --color-cf-sidebar-hover: rgba(255, 255, 255, 0.1);
+
+  /* Dark mode surfaces */
+  --color-cf-dark-bg: #1a1a2e;
+  --color-cf-dark-surface: #232942;
+  --color-cf-dark-border: #4c516d;
+  --color-cf-dark-text: #f2f3f4;
+  --color-cf-dark-text-secondary: #a9acb9;
+
+  /* Tipografía */
+  --font-montserrat: "Montserrat", Helvetica, Arial, Roboto, sans-serif;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-montserrat);
+    font-weight: 500;
+    font-size: 14px;
+    line-height: 22px;
+    letter-spacing: 0.25px;
+    color: var(--color-cf-text-primary);
+    background-color: var(--color-cf-bg-gray);
+  }
+
+  .dark body,
+  body.dark-body {
+    color: var(--color-cf-dark-text);
+    background-color: var(--color-cf-dark-bg);
+  }
+}
