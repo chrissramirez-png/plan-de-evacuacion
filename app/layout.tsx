@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CAMBIAR: Nombre App — ComunidadFeliz",
-  description: "CAMBIAR: Descripcion de tu app interna de ComunidadFeliz.",
+  title: "Plan de Evacuación Interactivo — ComunidadFeliz",
+  description: "Herramienta para crear y gestionar planes de evacuación con IA, mapas interactivos y análisis de planos.",
   icons: {
     icon: "/cf-logo-square.webp",
   },

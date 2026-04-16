@@ -11,11 +11,11 @@ import { NextResponse } from "next/server";
 // - Si consultas Supabase, usa RLS con filtro is_public = true
 // - Retorna solo datos agregados o anonimizados
 //
-// CAMBIAR: Renombra y adapta a tu caso
+// Plan de Evacuación Interactivo: Renombra y adapta a tu caso
 export async function GET() {
-  // CAMBIAR: Implementa tu logica publica aqui
+  // Plan de Evacuación Interactivo: Implementa tu logica publica aqui
   return NextResponse.json({
-    message: "CAMBIAR: Endpoint publico de ejemplo",
+    message: "Plan de Evacuación Interactivo: Endpoint publico de ejemplo",
     timestamp: new Date().toISOString(),
   });
 }

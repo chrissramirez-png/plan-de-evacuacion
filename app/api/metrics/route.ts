@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // CAMBIAR: Calcula y retorna los valores de tus metricas
+  // Plan de Evacuación Interactivo: Calcula y retorna los valores de tus metricas
   // Cada entrada debe corresponder a una key del menu
   const metrics: { key: string; value: unknown }[] = [
     // Ejemplo:

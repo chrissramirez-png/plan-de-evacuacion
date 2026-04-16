@@ -4,7 +4,7 @@ import { verifySlackSignature } from "@/lib/slack/verify";
 // POST /api/slack/interactions — Recibe interacciones (botones, menus, modals)
 // Configurar en Slack App > Interactivity > Request URL: https://tu-app.up.railway.app/api/slack/interactions
 //
-// CAMBIAR: Implementa los handlers para tus action_ids
+// Plan de Evacuación Interactivo: Implementa los handlers para tus action_ids
 
 interface InteractionPayload {
   type: string;
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
   // Block actions (buttons, menus, etc.)
   if (payload.type === "block_actions" && payload.actions) {
     for (const action of payload.actions) {
-      // CAMBIAR: Agrega handlers para tus action_ids
+      // Plan de Evacuación Interactivo: Agrega handlers para tus action_ids
       console.log(`Action: ${action.action_id}, value: ${action.value}`);
 
       // Ejemplo:
@@ -59,7 +59,7 @@ export async function POST(request: Request) {
     const callbackId = payload.view.callback_id;
     console.log(`Modal submitted: ${callbackId}`);
 
-    // CAMBIAR: Agrega handlers para tus callback_ids
+    // Plan de Evacuación Interactivo: Agrega handlers para tus callback_ids
     // Ejemplo:
     // if (callbackId === "create_ticket") {
     //   const values = payload.view.state.values;

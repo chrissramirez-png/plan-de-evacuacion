@@ -4,7 +4,7 @@ import { updateSession } from "@/lib/supabase/middleware";
 // Rutas siempre publicas (no requieren auth)
 const ALWAYS_PUBLIC = ["/login", "/auth/callback", "/auth/confirm"];
 
-// CAMBIAR: Agrega aqui las rutas publicas de tu app
+// Rutas públicas del Plan de Evacuación
 // Estas rutas son accesibles sin login (landing pages, vistas publicas, etc.)
 const PUBLIC_ROUTES = [
   "/public", // Paginas bajo app/(public)/
