@@ -211,7 +211,7 @@ describe("Security", () => {
 
     const migrationLower = migration.toLowerCase();
 
-    // Find all .from("table") calls in TS/TSX files
+    // Find all Supabase .from() calls in TS/TSX files
     const codeFiles = [
       ...listFiles("app"),
       ...listFiles("lib"),

@@ -1,10 +1,10 @@
 {
-  "name": "CAMBIAR: Nombre de la App",
-  "description": "CAMBIAR: Descripcion corta de lo que hace",
+  "name": "Plan de Evacuación Interactivo",
+  "description": "Herramienta para crear y gestionar planes de evacuación con IA (Gemini), mapas interactivos y análisis de planos.",
   "type": "frontend",
   "capabilities": ["frontend"],
   "visibility": "public",
-  "owner": "CAMBIAR@comunidadfeliz.cl",
+  "owner": "chriss.ramirez@comunidadfeliz.cl",
   "publicAuth": false,
   "supabase": {
     "rls_enabled": true,
@@ -15,7 +15,7 @@
     "metrics_menu": "/api/metrics/menu",
     "metrics": "/api/metrics"
   },
-  "env_required": [],
+  "env_required": ["GEMINI_API_KEY"],
   "sidebar_nav": [
     {
       "label": "Inicio",

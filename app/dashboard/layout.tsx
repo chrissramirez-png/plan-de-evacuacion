@@ -7,7 +7,7 @@ import AppLayout from "@/components/layout/AppLayout";
 import type { Profile } from "@/lib/types";
 import type { SidebarLink } from "@/components/layout/Sidebar";
 
-// CAMBIAR: Agrega links al sidebar si tu app los necesita.
+// Sidebar del Plan de Evacuación
 // Si el array esta vacio, no se muestra sidebar y el contenido ocupa todo el ancho.
 //
 // Ejemplo:

@@ -79,10 +79,10 @@ function LoginContent() {
             />
             <div className="text-center">
               <h1 className="text-[20px] leading-[24px] font-medium text-cf-text-primary dark:text-cf-dark-text tracking-[0.15px]">
-                CAMBIAR: Nombre App
+                Plan de Evacuación Interactivo
               </h1>
               <p className="mt-2 text-[14px] leading-[22px] font-medium text-cf-text-secondary dark:text-cf-dark-text-secondary tracking-[0.25px]">
-                CAMBIAR: Descripcion corta
+                Herramienta de evacuación con IA para edificios
               </p>
             </div>
           </div>

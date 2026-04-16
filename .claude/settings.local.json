@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C \"C:\\\\Users\\\\chriss.ramirez\\\\Desktop\\\\CLAUDE\\\\Plan de evacuacion\" show cf/main:skills/project/01-arquitectura.md)",
+      "Bash(git -C \"C:\\\\Users\\\\chriss.ramirez\\\\Desktop\\\\CLAUDE\\\\Plan de evacuacion\" show cf/main:skills/project/02-endpoints.md)",
+      "Bash(git -C \"C:\\\\Users\\\\chriss.ramirez\\\\Desktop\\\\CLAUDE\\\\Plan de evacuacion\" show cf/main:skills/project/03-seguridad-app.md)",
+      "Bash(git -C \"C:\\\\Users\\\\chriss.ramirez\\\\Desktop\\\\CLAUDE\\\\Plan de evacuacion\" show cf/main:skills/project/04-deploy.md)",
+      "Bash(git -C \"C:\\\\Users\\\\chriss.ramirez\\\\Desktop\\\\CLAUDE\\\\Plan de evacuacion\" show origin/main:App.jsx)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

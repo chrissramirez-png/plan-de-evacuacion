@@ -7,10 +7,10 @@ import { NextResponse } from "next/server";
 // 2. Procesa el payload
 // 3. Retorna 200 rapidamente (no hacer trabajo pesado sincrono)
 //
-// CAMBIAR: Renombra este archivo y adapta a tu caso (Slack, GitHub, Stripe, etc.)
+// Plan de Evacuación Interactivo: Renombra este archivo y adapta a tu caso (Slack, GitHub, Stripe, etc.)
 export async function POST(request: Request) {
   try {
-    // CAMBIAR: Valida el origen del webhook
+    // Plan de Evacuación Interactivo: Valida el origen del webhook
     // Ejemplo para un secret compartido:
     const webhookSecret = request.headers.get("x-webhook-secret");
     if (webhookSecret !== process.env.WEBHOOK_SECRET) {
@@ -19,7 +19,7 @@ export async function POST(request: Request) {
 
     const body = await request.json();
 
-    // CAMBIAR: Procesa el payload del webhook
+    // Plan de Evacuación Interactivo: Procesa el payload del webhook
     console.log("Webhook recibido:", body);
 
     return NextResponse.json({ received: true });

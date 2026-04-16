@@ -9,7 +9,7 @@ export interface CronJob {
   handler: () => Promise<{ success: boolean; message?: string }>;
 }
 
-// CAMBIAR: Registra tus cron jobs aqui
+// Plan de Evacuación Interactivo: Registra tus cron jobs aqui
 // Cada cron debe tener un nombre unico, descripcion, schedule sugerido y handler
 //
 // Ejemplo:

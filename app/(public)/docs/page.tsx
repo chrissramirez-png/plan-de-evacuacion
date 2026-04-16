@@ -28,10 +28,10 @@ export default function DocsPage() {
   return (
     <div className="max-w-3xl mx-auto">
       <h1 className="text-[20px] leading-[24px] font-medium text-cf-text-primary dark:text-cf-dark-text tracking-[0.15px] mb-2">
-        {config?.name || "CAMBIAR: Nombre App"}
+        {config?.name || "Plan de Evacuación Interactivo: Nombre App"}
       </h1>
       <p className="text-[14px] leading-[22px] text-cf-text-secondary dark:text-cf-dark-text-secondary mb-6">
-        {config?.description || "CAMBIAR: Descripcion"}
+        {config?.description || "Plan de Evacuación Interactivo: Descripcion"}
       </p>
 
       {/* Endpoints */}

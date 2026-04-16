@@ -31,7 +31,7 @@ export function listEventTypes(): string[] {
   return Array.from(eventHandlers.keys());
 }
 
-// CAMBIAR: Registra tus event handlers aqui
+// Plan de Evacuación Interactivo: Registra tus event handlers aqui
 //
 // Ejemplo:
 // onEvent("app_mention", async (event) => {

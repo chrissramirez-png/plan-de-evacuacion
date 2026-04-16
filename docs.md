@@ -1,16 +1,16 @@
-# CAMBIAR: Nombre de la App
+# Plan de Evacuación Interactivo
 
 ## Que hace
 
-CAMBIAR: Descripcion detallada de lo que hace la app y para quien es.
+Herramienta para que administradores de edificios creen planes de evacuación interactivos con IA, marcando salidas, extintores, rutas y puntos de encuentro en un plano.
 
 ## Como usar
 
-CAMBIAR: Instrucciones paso a paso para usar la app.
+1. Sube un plano del edificio o un PDF de plan de emergencia. 2. La IA sugiere ubicaciones de elementos de seguridad. 3. Ajusta los elementos manualmente. 4. Genera instrucciones de evacuación personalizadas.
 
 ## Requisitos
 
-CAMBIAR: Que necesita estar configurado o activado para que funcione.
+Requiere variable de entorno GEMINI_API_KEY con una clave válida de Google AI Studio.
 
 - Acceso a BigQuery (si aplica)
 - Canal de Slack configurado (si aplica)
@@ -18,4 +18,4 @@ CAMBIAR: Que necesita estar configurado o activado para que funcione.
 
 ## Contacto
 
-CAMBIAR: Quien mantiene esta app y como contactarle.
+Mantenido por chriss.ramirez@comunidadfeliz.cl

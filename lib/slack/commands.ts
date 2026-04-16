@@ -39,7 +39,7 @@ export function listCommands(): Omit<SlackCommand, "handler">[] {
   return Array.from(commands.values()).map(({ handler: _, ...rest }) => rest);
 }
 
-// CAMBIAR: Registra tus comandos aqui
+// Plan de Evacuación Interactivo: Registra tus comandos aqui
 //
 // Ejemplo:
 // registerCommand({

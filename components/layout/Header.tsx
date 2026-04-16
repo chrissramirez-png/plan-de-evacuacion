@@ -16,7 +16,7 @@ interface HeaderProps {
 }
 
 export default function Header({
-  appName = "CAMBIAR: Nombre App",
+  appName = "Plan de Evacuación Interactivo",
   userEmail,
   userName,
   hubUrl,

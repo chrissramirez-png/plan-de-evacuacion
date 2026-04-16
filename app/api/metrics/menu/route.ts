@@ -8,7 +8,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // CAMBIAR: Define las metricas que tu app expone
+  // Plan de Evacuación Interactivo: Define las metricas que tu app expone
   // Cada metrica tiene: key (unico), name (display), category, type
   // Categories: availability, usage, errors, engagement, performance
   // Types: number, percentage, timestamp, ranking
