@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  detect-stack:
+    name: Detectar stack
+    runs-on: ubuntu-latest
+    outputs:
+      stack: ${{ steps.check.outputs.stack }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        name: Detectar stack del proyecto
+        run: |
+          if [ -f hub.config.json ]; then
+            STACK=$(python3 -c "import json; print(json.load(open('hub.config.json')).get('stack',''))" 2>/dev/null || echo "")
+            if [ -n "$STACK" ]; then
+              echo "stack=$STACK" >> "$GITHUB_OUTPUT"
+              echo "Stack detectado desde hub.config.json: $STACK"
+              exit 0
+            fi
+          fi
+
+          if [ -f package.json ] && node -e "const p=require('./package.json'); process.exit(p.dependencies?.next ? 0 : 1)" 2>/dev/null; then
+            echo "stack=nextjs" >> "$GITHUB_OUTPUT"
+            echo "Stack detectado: nextjs (package.json)"
+          elif [ -f requirements.txt ]; then
+            echo "stack=python" >> "$GITHUB_OUTPUT"
+            echo "Stack detectado: python (requirements.txt)"
+          else
+            echo "stack=unknown" >> "$GITHUB_OUTPUT"
+            echo "::warning::No se pudo detectar el stack"
+          fi
+
+  ci:
+    needs: detect-stack
+    if: needs.detect-stack.outputs.stack == 'nextjs'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npx eslint . --ext .ts,.tsx
+
+      - name: Tests
+        run: npx vitest run
+
+      - name: Security audit
+        run: npm audit --audit-level=high || true
+
+      - name: Cache Next.js build
+        uses: actions/cache@v4
+        with:
+          path: .next/cache
+          key: nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-${{ hashFiles('**/*.ts', '**/*.tsx') }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ hashFiles('package-lock.json') }}-
+            nextjs-${{ runner.os }}-
+
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: https://placeholder.supabase.co
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: placeholder

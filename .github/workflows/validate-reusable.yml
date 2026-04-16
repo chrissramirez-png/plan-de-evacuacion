@@ -1,0 +1,723 @@
+name: Validaciones Innovation Hub (Reusable)
+
+on:
+  workflow_call:
+
+jobs:
+  detect-stack:
+    name: Detectar stack
+    runs-on: ubuntu-latest
+    outputs:
+      stack: ${{ steps.check.outputs.stack }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: check
+        name: Detectar stack del proyecto
+        run: |
+          if [ -f hub.config.json ]; then
+            STACK=$(python3 -c "import json; print(json.load(open('hub.config.json')).get('stack',''))" 2>/dev/null || echo "")
+            if [ -n "$STACK" ]; then
+              echo "stack=$STACK" >> "$GITHUB_OUTPUT"
+              echo "Stack detectado desde hub.config.json: $STACK"
+              exit 0
+            fi
+          fi
+
+          if [ -f package.json ] && node -e "const p=require('./package.json'); process.exit(p.dependencies?.next ? 0 : 1)" 2>/dev/null; then
+            echo "stack=nextjs" >> "$GITHUB_OUTPUT"
+            echo "Stack detectado: nextjs (package.json)"
+          elif [ -f requirements.txt ]; then
+            echo "stack=python" >> "$GITHUB_OUTPUT"
+            echo "Stack detectado: python (requirements.txt)"
+          else
+            echo "stack=unknown" >> "$GITHUB_OUTPUT"
+            echo "::warning::No se pudo detectar el stack"
+          fi
+
+  validate-security:
+    name: Seguridad
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Buscar secretos hardcodeados
+        run: |
+          ERRORS=0
+          PATTERNS=(
+            "sk_live_"
+            "sk_test_"
+            "AKIA[A-Z0-9]{16}"
+            "-----BEGIN PRIVATE KEY-----"
+            "-----BEGIN RSA PRIVATE KEY-----"
+            "sb_secret_"
+            "sbp_"
+          )
+
+          # Extensiones segun stack
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          if [ "$STACK" = "python" ]; then
+            INCLUDES='--include="*.py"'
+            EXCLUDES="__pycache__"
+          else
+            INCLUDES='--include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx"'
+            EXCLUDES="node_modules"
+          fi
+
+          for pattern in "${PATTERNS[@]}"; do
+            matches=$(eval grep -rn "\"$pattern\"" $INCLUDES . 2>/dev/null | grep -v "$EXCLUDES" | grep -v ".env.example" | grep -v "skills/" | grep -v "tests/" | grep -v ".github/" || true)
+            if [ -n "$matches" ]; then
+              echo "::error::SECRETO DETECTADO con patron: $pattern"
+              echo "$matches"
+              ERRORS=$((ERRORS+1))
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "::error::Secretos encontrados en el codigo. Usar variables de entorno."
+            exit 1
+          fi
+          echo "Sin secretos hardcodeados"
+
+      - name: Verificar RLS en migraciones SQL
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          EXCLUDE_PATH="./node_modules/*"
+          if [ "$STACK" = "python" ]; then
+            EXCLUDE_PATH="./__pycache__/*"
+          fi
+
+          WARNINGS=0
+          for sqlfile in $(find . -name "*.sql" -not -path "$EXCLUDE_PATH" -not -path "./skills/*" 2>/dev/null); do
+            tables=$(grep -i "CREATE TABLE" "$sqlfile" 2>/dev/null || true)
+            rls=$(grep -i "ENABLE ROW LEVEL SECURITY" "$sqlfile" 2>/dev/null || true)
+            if [ -n "$tables" ] && [ -z "$rls" ]; then
+              echo "::warning::$sqlfile crea tablas pero no habilita RLS"
+              WARNINGS=$((WARNINGS+1))
+            fi
+          done
+
+          if [ $WARNINGS -gt 0 ]; then
+            echo "::error::$WARNINGS archivos SQL crean tablas sin RLS"
+            exit 1
+          else
+            echo "Migraciones SQL con RLS"
+          fi
+
+      - name: Buscar eval/exec
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          if [ "$STACK" = "python" ]; then
+            matches=$(grep -rn "\beval\s*(" --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v skills/ | grep -v tests/ || true)
+            exec_matches=$(grep -rn "\bexec\s*(" --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v skills/ | grep -v tests/ || true)
+            if [ -n "$matches" ] || [ -n "$exec_matches" ]; then
+              echo "::warning::eval()/exec() encontrado"
+              echo "$matches"
+              echo "$exec_matches"
+            else
+              echo "Sin eval/exec"
+            fi
+          else
+            matches=$(grep -rn "\beval\s*(" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" . 2>/dev/null | grep -v node_modules | grep -v skills/ || true)
+            if [ -n "$matches" ]; then
+              echo "::warning::eval() encontrado"
+              echo "$matches"
+            else
+              echo "Sin eval/exec"
+            fi
+          fi
+
+      - name: Buscar URLs de Railway hardcodeadas
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          if [ "$STACK" = "python" ]; then
+            INCLUDES='--include="*.py"'
+            EXCLUDES="__pycache__"
+          else
+            INCLUDES='--include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx"'
+            EXCLUDES="node_modules"
+          fi
+          matches=$(eval grep -rn "up\\.railway\\.app" $INCLUDES . 2>/dev/null | grep -v "$EXCLUDES" | grep -v skills/ | grep -v ".env" | grep -v hub.config.json | grep -v ".github/" || true)
+          if [ -n "$matches" ]; then
+            echo "::warning::URLs de Railway hardcodeadas"
+            echo "$matches"
+          else
+            echo "Sin URLs hardcodeadas"
+          fi
+
+  validate-stack:
+    name: Stack aprobado
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar stack
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          ERRORS=0
+
+          if [ "$STACK" = "nextjs" ]; then
+            echo "--- Validando stack: Next.js ---"
+            if [ ! -f package.json ]; then
+              echo "::error::Falta package.json"
+              ERRORS=$((ERRORS+1))
+            else
+              HAS_NEXT=$(node -e "const p=require('./package.json'); const d={...p.dependencies,...p.devDependencies}; console.log(d['next'] ? 'true' : 'false')")
+              if [ "$HAS_NEXT" = "false" ]; then
+                echo "::error::package.json no tiene 'next' como dependencia"
+                ERRORS=$((ERRORS+1))
+              fi
+            fi
+
+            for item in requirements.txt Pipfile go.mod Procfile; do
+              if [ -f "$item" ]; then
+                echo "::error::$item encontrado — solo Next.js es permitido"
+                ERRORS=$((ERRORS+1))
+              fi
+            done
+
+            BLOCKED=("mongoose" "mongodb" "firebase" "firebase-admin" "@auth0/nextjs-auth0" "@clerk/nextjs" "@aws-sdk/client-s3" "@upstash/redis" "@upstash/qstash" "mysql2" "mysql" "planetscale-database" "@neondatabase/serverless" "@libsql/client" "express")
+            for dep in "${BLOCKED[@]}"; do
+              HAS_DEP=$(node -e "const p=require('./package.json'); const d={...p.dependencies,...p.devDependencies}; console.log(d['$dep'] ? 'true' : 'false')" 2>/dev/null || echo "false")
+              if [ "$HAS_DEP" = "true" ]; then
+                echo "::error::Dependencia bloqueada: $dep"
+                ERRORS=$((ERRORS+1))
+              fi
+            done
+
+          elif [ "$STACK" = "python" ]; then
+            echo "--- Validando stack: Python ---"
+            if [ ! -f requirements.txt ]; then
+              echo "::error::Falta requirements.txt"
+              ERRORS=$((ERRORS+1))
+            fi
+            if [ ! -f Dockerfile ]; then
+              echo "::error::Falta Dockerfile"
+              ERRORS=$((ERRORS+1))
+            fi
+            if [ -f go.mod ]; then
+              echo "::error::go.mod encontrado — solo Python es permitido"
+              ERRORS=$((ERRORS+1))
+            fi
+
+          else
+            echo "Stack desconocido ($STACK) — skip"
+            exit 0
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            exit 1
+          fi
+          echo "Stack aprobado OK"
+
+  validate-structure:
+    name: Estructura
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar archivos base
+        run: |
+          ERRORS=0
+
+          if [ ! -f .gitignore ]; then
+            echo "::error::Falta .gitignore"
+            ERRORS=$((ERRORS+1))
+          else
+            for entry in ".env" ".env.local"; do
+              if ! grep -q "$entry" .gitignore; then
+                echo "::error::.gitignore no tiene: $entry"
+                ERRORS=$((ERRORS+1))
+              fi
+            done
+            echo ".gitignore OK"
+          fi
+
+          if git ls-files --error-unmatch .env 2>/dev/null; then
+            echo "::error::.env esta en git"
+            ERRORS=$((ERRORS+1))
+          fi
+          if git ls-files --error-unmatch .env.local 2>/dev/null; then
+            echo "::error::.env.local esta en git"
+            ERRORS=$((ERRORS+1))
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            exit 1
+          fi
+          echo "Estructura correcta"
+
+  validate-scaffold:
+    name: Scaffold
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar archivos minimos del scaffold
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          ERRORS=0
+
+          if [ "$STACK" = "nextjs" ]; then
+            REQUIRED_FILES=(
+              "app/layout.tsx" "app/page.tsx" "app/login/page.tsx"
+              "app/auth/callback/page.tsx" "app/dashboard/layout.tsx"
+              "app/dashboard/page.tsx" "app/api/health/route.ts"
+              "app/api/metrics/route.ts" "app/api/metrics/menu/route.ts"
+              "app/api/auth/profile/route.ts" "app/globals.css"
+              "middleware.ts" "lib/supabase/client.ts" "lib/supabase/server.ts"
+              "lib/supabase/middleware.ts" "lib/auth.ts" "lib/types.ts"
+              "components/layout/Header.tsx" "components/layout/AppLayout.tsx"
+              "components/layout/ThemeProvider.tsx" "components/layout/PublicLayout.tsx"
+              "components/ui/Button.tsx" "components/ui/Card.tsx"
+              "hub.config.json" "migrations/001_initial.sql"
+            )
+          elif [ "$STACK" = "python" ]; then
+            REQUIRED_FILES=(
+              "app/__init__.py" "app/main.py" "app/config.py" "app/auth.py"
+              "app/routers/__init__.py" "app/routers/health.py" "app/routers/metrics.py"
+              "Dockerfile" "requirements.txt" "hub.config.json" "migrations/001_initial.sql"
+            )
+          else
+            echo "Stack desconocido ($STACK) — skip"
+            exit 0
+          fi
+
+          for f in "${REQUIRED_FILES[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "::error::Falta archivo del scaffold: $f"
+              ERRORS=$((ERRORS+1))
+            else
+              echo "$f OK"
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::Faltan $ERRORS archivos del scaffold."
+            exit 1
+          fi
+          echo "Scaffold completo"
+
+  validate-auth:
+    name: Autenticacion
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar sistema de autenticacion
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+
+          # Skip si es el template
+          if [ -f hub.config.json ]; then
+            IS_TEMPLATE=$(python3 -c "import json; print('true' if 'CAMBIAR' in json.dumps(json.load(open('hub.config.json'))) else 'false')" 2>/dev/null || echo "false")
+            if [ "$IS_TEMPLATE" = "true" ]; then
+              echo "Es el template — skip validacion de auth"
+              exit 0
+            fi
+          fi
+
+          ERRORS=0
+
+          if [ "$STACK" = "python" ]; then
+            # Python: buscar supabase en archivos .py
+            AUTH_FOUND=false
+            for pattern in "supabase" "get_user" "verify_supabase_token"; do
+              matches=$(grep -rl "$pattern" --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v skills/ | grep -v .github/ | head -1)
+              if [ -n "$matches" ]; then
+                AUTH_FOUND=true
+                break
+              fi
+            done
+          else
+            # Next.js: verificar dependencias Supabase
+            if [ -f package.json ]; then
+              HAS_SSR=$(node -e "const p=require('./package.json'); const d={...p.dependencies,...p.devDependencies}; console.log(d['@supabase/ssr'] ? 'true' : 'false')")
+              HAS_JS=$(node -e "const p=require('./package.json'); const d={...p.dependencies,...p.devDependencies}; console.log(d['@supabase/supabase-js'] ? 'true' : 'false')")
+              if [ "$HAS_SSR" = "false" ] && [ "$HAS_JS" = "false" ]; then
+                echo "::error::No se encontro @supabase/ssr ni @supabase/supabase-js en package.json"
+                ERRORS=$((ERRORS+1))
+              else
+                echo "Dependencias Supabase encontradas"
+              fi
+            fi
+
+            if [ ! -d "app/login" ]; then
+              echo "::error::Falta directorio app/login"
+              ERRORS=$((ERRORS+1))
+            fi
+            if [ ! -d "app/auth/callback" ]; then
+              echo "::error::Falta directorio app/auth/callback"
+              ERRORS=$((ERRORS+1))
+            fi
+
+            AUTH_FOUND=false
+            for pattern in "supabase" "createClient" "getSession" "getUser" "@supabase/supabase-js" "@supabase/ssr"; do
+              matches=$(grep -rl "$pattern" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" . 2>/dev/null | grep -v node_modules | grep -v skills/ | grep -v .github/ | head -1)
+              if [ -n "$matches" ]; then
+                AUTH_FOUND=true
+                break
+              fi
+            done
+          fi
+
+          if [ "$AUTH_FOUND" = "false" ]; then
+            echo "::error::Este proyecto NO tiene sistema de autenticacion."
+            ERRORS=$((ERRORS+1))
+          else
+            echo "Sistema de autenticacion detectado"
+          fi
+
+          # Verificar endpoints de metricas
+          if [ -f hub.config.json ]; then
+            for endpoint in health metrics_menu metrics; do
+              value=$(python3 -c "import json; c=json.load(open('hub.config.json')); print(c.get('endpoints',{}).get('$endpoint',''))" 2>/dev/null || echo "")
+              if [ -z "$value" ]; then
+                echo "::error::Endpoint '$endpoint' no definido en hub.config.json."
+                ERRORS=$((ERRORS+1))
+              else
+                echo "Endpoint $endpoint: $value"
+              fi
+            done
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            exit 1
+          fi
+          echo "Auth y endpoints OK"
+
+  validate-skills:
+    name: Skills
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar skills basicas
+        run: |
+          ERRORS=0
+          for file in \
+            skills/baseline/seguridad.md \
+            skills/baseline/navegacion.md; do
+            if [ ! -f "$file" ]; then
+              echo "::error::Falta: $file"
+              ERRORS=$((ERRORS+1))
+            else
+              echo "$file OK"
+            fi
+          done
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::Faltan archivos de skills."
+            exit 1
+          fi
+          echo "Skills presentes"
+
+  validate-public-routes:
+    name: Seguridad rutas publicas
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar que rutas publicas no exponen datos sensibles
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          ERRORS=0
+
+          SENSITIVE_PATTERNS=(
+            "SUPABASE_SERVICE_ROLE_KEY"
+            "createServiceRoleClient"
+            "verifyToken"
+            "METRICS_API_KEY"
+          )
+
+          if [ "$STACK" = "python" ]; then
+            # Python: no hay app/(public) ni app/api/public con el mismo formato
+            echo "Validacion de rutas publicas para Python — skip (no aplica misma estructura)"
+            exit 0
+          fi
+
+          # Escanear paginas publicas
+          if [ -d "app/(public)" ]; then
+            for pattern in "${SENSITIVE_PATTERNS[@]}"; do
+              matches=$(grep -rn "$pattern" "app/(public)/" --include="*.ts" --include="*.tsx" 2>/dev/null | grep -v "^.*:.*//.*$pattern" || true)
+              if [ -n "$matches" ]; then
+                echo "::error::Patron sensible '$pattern' encontrado en ruta publica:"
+                echo "$matches"
+                ERRORS=$((ERRORS+1))
+              fi
+            done
+          fi
+
+          # Escanear API routes publicas
+          if [ -d "app/api/public" ]; then
+            for pattern in "${SENSITIVE_PATTERNS[@]}"; do
+              matches=$(grep -rn "$pattern" "app/api/public/" --include="*.ts" 2>/dev/null | grep -v "^.*:.*//.*$pattern" || true)
+              if [ -n "$matches" ]; then
+                echo "::error::Patron sensible '$pattern' encontrado en API publica:"
+                echo "$matches"
+                ERRORS=$((ERRORS+1))
+              fi
+            done
+
+            # Verificar que APIs publicas no usan auth
+            AUTH_IN_PUBLIC=$(grep -rn "verifyToken\|getSession\|auth\.getUser" "app/api/public/" --include="*.ts" 2>/dev/null | grep -v "^.*:.*//.*" || true)
+            if [ -n "$AUTH_IN_PUBLIC" ]; then
+              echo "::error::APIs publicas no deben usar autenticacion:"
+              echo "$AUTH_IN_PUBLIC"
+              ERRORS=$((ERRORS+1))
+            fi
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            echo ""
+            echo "::error::Rutas publicas exponen datos sensibles o usan auth."
+            exit 1
+          fi
+          echo "Rutas publicas seguras"
+
+      - name: Verificar consistencia publicRoutes
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+          if [ "$STACK" = "python" ]; then
+            echo "Skip para Python"
+            exit 0
+          fi
+
+          if [ ! -f hub.config.json ]; then
+            echo "Sin hub.config.json — skip"
+            exit 0
+          fi
+
+          PUBLIC_ROUTES=$(node -e "const c=require('./hub.config.json'); (c.publicRoutes||[]).forEach(r=>console.log(r))" 2>/dev/null || true)
+          if [ -z "$PUBLIC_ROUTES" ]; then
+            echo "Sin publicRoutes en hub.config.json — skip"
+            exit 0
+          fi
+
+          ERRORS=0
+          while IFS= read -r route; do
+            if ! grep -q "$route" middleware.ts 2>/dev/null; then
+              echo "::error::Ruta publica '$route' declarada en hub.config.json pero NO en middleware.ts"
+              ERRORS=$((ERRORS+1))
+            fi
+          done <<< "$PUBLIC_ROUTES"
+
+          if [ $ERRORS -gt 0 ]; then
+            exit 1
+          fi
+          echo "publicRoutes consistentes entre hub.config.json y middleware.ts"
+
+  validate-capabilities:
+    name: Capabilities
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validar capabilities
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+
+          if [ ! -f hub.config.json ]; then
+            echo "Sin hub.config.json — skip"
+            exit 0
+          fi
+
+          ERRORS=0
+
+          # Read capabilities (use python3 for both stacks — always available on ubuntu)
+          CAPS=$(python3 -c "import json; [print(c) for c in json.load(open('hub.config.json')).get('capabilities',[])]" 2>/dev/null || true)
+          if [ -z "$CAPS" ]; then
+            echo "Sin capabilities en hub.config.json — skip"
+            exit 0
+          fi
+
+          echo "Capabilities: $CAPS"
+
+          if [ "$STACK" = "nextjs" ]; then
+            if echo "$CAPS" | grep -q "^frontend$"; then
+              echo "--- Validando capability: frontend ---"
+              for f in "app/login/page.tsx" "app/auth/callback/page.tsx" "app/dashboard/layout.tsx" "app/dashboard/page.tsx"; do
+                if [ ! -f "$f" ]; then
+                  echo "::error::Capability frontend requiere: $f"
+                  ERRORS=$((ERRORS+1))
+                else
+                  echo "$f OK"
+                fi
+              done
+              if [ -f "app/login/page.tsx" ] && ! grep -q "signInWithOAuth" "app/login/page.tsx"; then
+                echo "::error::app/login/page.tsx debe contener signInWithOAuth"
+                ERRORS=$((ERRORS+1))
+              fi
+            fi
+
+            if echo "$CAPS" | grep -q "^api$"; then
+              echo "--- Validando capability: api ---"
+              for f in "app/api/health/route.ts" "app/api/metrics/route.ts" "app/api/metrics/menu/route.ts"; do
+                if [ ! -f "$f" ]; then
+                  echo "::error::Capability api requiere: $f"
+                  ERRORS=$((ERRORS+1))
+                else
+                  echo "$f OK"
+                fi
+              done
+            fi
+
+            if echo "$CAPS" | grep -q "^cron$"; then
+              echo "--- Validando capability: cron ---"
+              for f in "lib/cron.ts" "app/api/cron/route.ts" "app/api/cron/[name]/route.ts"; do
+                if [ ! -f "$f" ]; then
+                  echo "::error::Capability cron requiere: $f"
+                  ERRORS=$((ERRORS+1))
+                else
+                  echo "$f OK"
+                fi
+              done
+            fi
+
+            if echo "$CAPS" | grep -q "^slack_bot$"; then
+              echo "--- Validando capability: slack_bot ---"
+              for f in "lib/slack/verify.ts" "lib/slack/client.ts" "lib/slack/commands.ts" "lib/slack/events.ts" "app/api/slack/commands/route.ts" "app/api/slack/events/route.ts" "app/api/slack/interactions/route.ts"; do
+                if [ ! -f "$f" ]; then
+                  echo "::error::Capability slack_bot requiere: $f"
+                  ERRORS=$((ERRORS+1))
+                else
+                  echo "$f OK"
+                fi
+              done
+              if [ -f "lib/slack/verify.ts" ] && ! grep -q "verifySlackSignature" "lib/slack/verify.ts"; then
+                echo "::error::lib/slack/verify.ts debe contener verifySlackSignature"
+                ERRORS=$((ERRORS+1))
+              fi
+            fi
+
+            # Docs required when no frontend
+            if ! echo "$CAPS" | grep -q "^frontend$"; then
+              echo "--- Validando documentacion (sin frontend) ---"
+              if [ ! -f "app/(public)/docs/page.tsx" ]; then
+                echo "::error::Proyectos sin frontend requieren: app/(public)/docs/page.tsx"
+                ERRORS=$((ERRORS+1))
+              fi
+              if [ ! -f "docs.md" ] || [ ! -s "docs.md" ]; then
+                echo "::error::Proyectos sin frontend requieren: docs.md con contenido"
+                ERRORS=$((ERRORS+1))
+              fi
+            fi
+
+          elif [ "$STACK" = "python" ]; then
+            if echo "$CAPS" | grep -q "^api$"; then
+              echo "--- Validando capability: api ---"
+              for f in "app/routers/health.py" "app/routers/metrics.py"; do
+                if [ ! -f "$f" ]; then
+                  echo "::error::Capability api requiere: $f"
+                  ERRORS=$((ERRORS+1))
+                else
+                  echo "$f OK"
+                fi
+              done
+            fi
+
+          else
+            echo "Stack desconocido ($STACK) — skip"
+            exit 0
+          fi
+
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::Faltan $ERRORS archivos requeridos por las capabilities."
+            exit 1
+          fi
+          echo "Capabilities validadas correctamente"
+
+  validate-migration-sync:
+    name: Migracion SQL sincronizada
+    needs: detect-stack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verificar que tablas del codigo estan en la migracion
+        run: |
+          STACK="${{ needs.detect-stack.outputs.stack }}"
+
+          # Find migration file from hub.config.json
+          MIGRATION_PATH=""
+          if [ -f hub.config.json ]; then
+            MIGRATION_PATH=$(python3 -c "import json; c=json.load(open('hub.config.json')); print(c.get('supabase',{}).get('migration',''))" 2>/dev/null || echo "")
+          fi
+
+          if [ -z "$MIGRATION_PATH" ] || [ ! -f "$MIGRATION_PATH" ]; then
+            echo "Sin archivo de migracion configurado — skip"
+            exit 0
+          fi
+
+          # Skip if migration is still the template placeholder
+          if grep -q "CAMBIAR" "$MIGRATION_PATH" 2>/dev/null; then
+            echo "Migracion tiene placeholders CAMBIAR — skip (template mode)"
+            exit 0
+          fi
+
+          MIGRATION_CONTENT=$(cat "$MIGRATION_PATH" | tr '[:upper:]' '[:lower:]')
+          ERRORS=0
+          WARNINGS=0
+
+          # Rechazar acceso a schema public
+          PUBLIC_REFS=$(grep -inE "public\." "$MIGRATION_PATH" | grep -ivE "^[[:space:]]*--" || true)
+          if [ -n "$PUBLIC_REFS" ]; then
+            echo "::error::Migracion rechazada: Acceso a schema no permitido."
+            echo "::error::Solo se permite crear objetos en el schema propio de la app, NUNCA en \"public\"."
+            echo "::error::El schema \"public\" es gestionado por el Hub."
+            echo ""
+            echo "Lineas con referencia a public:"
+            echo "$PUBLIC_REFS"
+            exit 1
+          fi
+
+          # Extract table names from code based on stack
+          TABLES=""
+          if [ "$STACK" = "python" ]; then
+            # Python: .from_("table") or table("table") patterns
+            TABLES=$(grep -rhoP '\.from_\(\s*["\x27]([a-z_][a-z0-9_]*)["\x27]' --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v skills/ | sed "s/.*[\"']\\([a-z_][a-z0-9_]*\\)[\"'].*/\\1/" | sort -u)
+            TABLES2=$(grep -rhoP 'table\(\s*["\x27]([a-z_][a-z0-9_]*)["\x27]' --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v skills/ | sed "s/.*[\"']\\([a-z_][a-z0-9_]*\\)[\"'].*/\\1/" | sort -u)
+            # Python REST API: /rest/v1/table_name pattern
+            TABLES3=$(grep -rhoP '/rest/v1/([a-z_][a-z0-9_]*)' --include="*.py" . 2>/dev/null | grep -v __pycache__ | grep -v skills/ | sed 's|.*/rest/v1/||' | sort -u)
+            TABLES=$(echo -e "$TABLES\n$TABLES2\n$TABLES3" | sort -u | grep -v '^$' || true)
+          else
+            # Next.js: .from("table") pattern
+            TABLES=$(grep -rhoP '\.from\(\s*["\x27]([a-z_][a-z0-9_]*)["\x27]' --include="*.ts" --include="*.tsx" . 2>/dev/null | grep -v node_modules | grep -v skills/ | grep -v ".test." | sed "s/.*[\"']\\([a-z_][a-z0-9_]*\\)[\"'].*/\\1/" | sort -u || true)
+          fi
+
+          if [ -z "$TABLES" ]; then
+            echo "No se detectaron tablas en el codigo — skip"
+            exit 0
+          fi
+
+          echo "Tablas detectadas en el codigo:"
+          echo "$TABLES"
+          echo ""
+
+          for table in $TABLES; do
+            # Check if CREATE TABLE exists for this table (with or without schema prefix)
+            if echo "$MIGRATION_CONTENT" | grep -q "create table.*${table}"; then
+              echo "  $table — OK"
+            else
+              echo "::error::Tabla '$table' usada en el codigo pero no tiene CREATE TABLE en $MIGRATION_PATH"
+              ERRORS=$((ERRORS+1))
+            fi
+          done
+
+          echo ""
+          if [ $ERRORS -gt 0 ]; then
+            echo "::error::$ERRORS tabla(s) del codigo no estan en la migracion SQL."
+            echo "::error::Actualiza $MIGRATION_PATH con los CREATE TABLE faltantes."
+            echo "::error::Ver skills/baseline/migraciones.md para el formato correcto."
+            exit 1
+          fi
+          echo "Migracion SQL sincronizada con el codigo"
