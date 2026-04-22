@@ -28,7 +28,11 @@ export async function middleware(request: NextRequest) {
   }
 
   // Pages: refresh cookies but don't block (client-side auth)
-  const { supabaseResponse } = await updateSession(request);
+  const { user, supabaseResponse } = await updateSession(request);
+  // H2 — Redirect to login if no valid session
+  if (!user) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
   return supabaseResponse;
 }
 
