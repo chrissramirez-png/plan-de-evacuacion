@@ -1,3 +1,4 @@
+import { fireAccessLog } from "@/lib/access-log";
 import { NextResponse } from "next/server";
 import { createClient, createServiceRoleClient } from "@/lib/supabase/server";
 import { getInitialRole } from "@/lib/auth";
@@ -46,5 +47,6 @@ export async function POST() {
       .eq("id", user.id);
   }
 
+  fireAccessLog(user.email);
   return NextResponse.json({ success: true });
 }
