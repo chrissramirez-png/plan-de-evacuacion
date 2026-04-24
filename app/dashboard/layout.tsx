@@ -43,6 +43,9 @@ export default function DashboardLayout({
         return;
       }
 
+      // Fire-and-forget: update profile + send access log to Hub
+      fetch("/api/auth/profile", { method: "POST" }).catch(() => {});
+
       // Fetch profile direct from Supabase
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase as any)
