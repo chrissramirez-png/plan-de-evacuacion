@@ -210,6 +210,48 @@ Reglas:
 }
 
 /* ─── AI: emergency plan PDF analysis ───────────────────────── */
+/* ─── AI: generate floor plan SVG from PDF ───────────────────── */
+async function generateFloorPlanSVG(pdfDataUrl: string, extracted: PDFExtracted): Promise<string> {
+  const { data } = parseDataUrl(pdfDataUrl);
+  const buildingDesc = [
+    extracted.edificio?.nombre && `Edificio: ${extracted.edificio.nombre}`,
+    extracted.edificio?.pisos && `Pisos: ${extracted.edificio.pisos}`,
+    extracted.edificio?.infoAdicional,
+  ].filter(Boolean).join(". ") || "Edificio residencial";
+
+  const text = await callGemini({
+    max_tokens: 4000,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "document", source: { type: "base64", media_type: "application/pdf", data } },
+        {
+          type: "text",
+          text: `Basándote en este plan de emergencia, genera un plano esquemático de UN PISO TÍPICO en formato SVG.
+
+Información del edificio: ${buildingDesc}
+
+REQUISITOS DEL SVG:
+- width="1200" height="800" con xmlns="http://www.w3.org/2000/svg"
+- Dibuja la planta del piso: pasillos centrales, escaleras, shaft de ascensores, departamentos esquematizados como rectángulos
+- Colores: fondo #F8FAFC, paredes #6B7280 (stroke, no fill), habitaciones/deptos #FFFFFF con stroke #D1D5DB, pasillos #F3F4F6, escaleras #E5E7EB con texto
+- Grosor de paredes: stroke-width="3" para muros exteriores, stroke-width="1.5" para interiores
+- Agrega etiquetas de texto simples: "Pasillo", "Escalera Norte", "Escalera Sur", "Ascensores", "Depto", etc.
+- El plano debe ocupar casi todo el SVG, con margen de ~40px
+- Sé preciso con la distribución típica de un edificio residencial de altura
+
+Responde ÚNICAMENTE con el código SVG completo, empezando exactamente con <svg y terminando con </svg>. Sin markdown, sin bloques de código, sin texto adicional.`,
+        },
+      ],
+    }],
+  });
+
+  const svgMatch = text.match(/<svg[\s\S]*<\/svg>/i);
+  if (!svgMatch) throw new Error("No se pudo generar el plano SVG");
+  const svgCode = svgMatch[0];
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgCode)))}`;
+}
+
 async function analyzeEmergencyPlanPDF(pdfDataUrl: string): Promise<PDFExtracted> {
   const { data } = parseDataUrl(pdfDataUrl);
   const text = await callGemini({
@@ -1394,10 +1436,12 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
   const [analyzeError, setAnalyzeError]       = useState<string | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
 
-  const [pdfAnalyzing, setPdfAnalyzing]   = useState(false);
-  const [pdfExtracted, setPdfExtracted]   = useState<PDFExtracted | null>(null);
-  const [showPdfReview, setShowPdfReview] = useState(false);
-  const [pdfError, setPdfError]           = useState<string | null>(null);
+  const [pdfAnalyzing, setPdfAnalyzing]     = useState(false);
+  const [pdfExtracted, setPdfExtracted]     = useState<PDFExtracted | null>(null);
+  const [pdfDataUrl, setPdfDataUrl]         = useState<string | null>(null);
+  const [showPdfReview, setShowPdfReview]   = useState(false);
+  const [pdfError, setPdfError]             = useState<string | null>(null);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const pdfRef  = useRef<HTMLInputElement>(null);
@@ -1441,7 +1485,9 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        const result = await analyzeEmergencyPlanPDF(ev.target?.result as string);
+        const dataUrl = ev.target?.result as string;
+        setPdfDataUrl(dataUrl);
+        const result = await analyzeEmergencyPlanPDF(dataUrl);
         setPdfExtracted(result);
         setShowPdfReview(true);
       } catch (err: any) {
@@ -1453,7 +1499,7 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     reader.readAsDataURL(file);
   }, []);
 
-  const handleApplyPdf = useCallback(() => {
+  const handleApplyPdf = useCallback(async () => {
     if (!pdfExtracted) return;
     const { edificio, salidas, extintores, puntos, mangueras, rutas } = pdfExtracted;
     if (edificio?.nombre) setPlanName(edificio.nombre);
@@ -1469,11 +1515,25 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     addEl("punto", puntos);
     addEl("manguera", mangueras);
     (rutas || []).forEach((r) => addRoute(r.points));
-    // Si no hay imagen cargada, usar canvas en blanco para entrar directo al editor
-    setImage((prev) => prev ?? BLANK_CANVAS);
     setShowPdfReview(false);
     setShowCtx(true);
-  }, [pdfExtracted, reset, addElement, addRoute, setImage]);
+
+    // Generar plano con IA a partir del PDF
+    if (pdfDataUrl) {
+      setGeneratingPlan(true);
+      setImage(BLANK_CANVAS); // canvas temporal mientras genera
+      try {
+        const svgDataUrl = await generateFloorPlanSVG(pdfDataUrl, pdfExtracted);
+        setImage(svgDataUrl);
+      } catch {
+        // Si falla la generación, dejar el canvas en blanco
+      } finally {
+        setGeneratingPlan(false);
+      }
+    } else {
+      setImage((prev) => prev ?? BLANK_CANVAS);
+    }
+  }, [pdfExtracted, pdfDataUrl, reset, addElement, addRoute, setImage]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -2007,6 +2067,16 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
                 style={{ width: "100%", height: "100%", objectFit: "contain", userSelect: "none" }}
                 draggable={false}
               />
+              {generatingPlan && (
+                <div style={{
+                  position: "absolute", inset: 0, background: "rgba(248,250,252,0.85)",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, zIndex: 10,
+                }}>
+                  <Loader2 size={36} color={C.blue} className="spin" />
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: C.gray }}>Generando plano con IA...</p>
+                  <p style={{ margin: 0, fontSize: 12, color: C.grayMid }}>Esto puede tomar unos segundos</p>
+                </div>
+              )}
               <RouteLayer
                 routes={routes} currentRoute={currentRoute}
                 routeColor={routeColor} emergency={emergency} markerId="arrA"
