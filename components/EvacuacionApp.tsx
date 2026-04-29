@@ -55,6 +55,16 @@ interface PDFExtracted extends AISuggestion {
   edificio?: { nombre?: string; pisos?: string; infoAdicional?: string; zonasBlockeadas?: string };
   alertas?: string[];
 }
+interface BuildingDetails {
+  nombre:          string;
+  tipo:            string;
+  pisos:           string;
+  forma:           string;
+  unidadesPorPiso: string;
+  escaleras:       string;
+  tieneAscensores: boolean;
+  descripcion:     string;
+}
 
 /* ─── Constants ─────────────────────────────────────────────── */
 const TOOLS: Record<string, { id: string; label: string; icon: React.ComponentType<any>; color: string; bg: string }> = {
@@ -210,51 +220,82 @@ Reglas:
 }
 
 /* ─── AI: generate floor plan SVG from PDF ───────────────────── */
-async function generateFloorPlanSVG(extracted: PDFExtracted): Promise<string> {
+async function generateFloorPlanSVG(extracted: PDFExtracted, details?: BuildingDetails): Promise<string> {
   const ed = extracted.edificio || {};
-  const nombre   = ed.nombre        || "Edificio residencial";
-  const pisos    = ed.pisos         || "varios pisos";
-  const extra    = ed.infoAdicional || "";
+
+  // Merge: details (from user) override extracted (from PDF)
+  const nombre     = details?.nombre          || ed.nombre          || "Edificio";
+  const tipo       = details?.tipo            || "Residencial";
+  const pisos      = details?.pisos           || ed.pisos            || "varios";
+  const forma      = details?.forma           || "Rectangular";
+  const unidades   = details?.unidadesPorPiso || "";
+  const escaleras  = details?.escaleras       || "2";
+  const ascensores = details?.tieneAscensores !== false;
+  const descripcion = details?.descripcion    || ed.infoAdicional    || "";
   const bloqueadas = ed.zonasBlockeadas || "";
 
-  // Describe salidas y rutas identificadas para que el SVG las refleje
   const salidasDesc = (extracted.salidas || [])
-    .map((s) => `"${s.label}" aprox. ${s.x}% horizontal / ${s.y}% vertical`)
-    .join(", ") || "sin información";
+    .map((s) => `"${s.label}" (aprox. x=${s.x}% y=${s.y}%)`)
+    .join(", ") || "según norma";
 
   const rutasDesc = (extracted.rutas || [])
     .map((r) => r.label)
     .join(", ") || "sin información";
 
-  const prompt = `Eres un arquitecto técnico. Genera un plano esquemático de la PLANTA TÍPICA de este edificio en SVG.
+  const prompt = `Eres un arquitecto técnico especialista en planos de planta. Genera el plano esquemático de UN PISO TÍPICO de este edificio en formato SVG.
 
-DATOS DEL EDIFICIO:
+═══ DATOS DEL EDIFICIO ═══
 - Nombre: ${nombre}
-- Pisos: ${pisos}
-- Info adicional: ${extra || "ninguna"}
+- Tipo: ${tipo}
+- Número de pisos: ${pisos}
+- Forma de la planta: ${forma}
+- Unidades / oficinas por piso: ${unidades || "no especificado"}
+- Núcleos de escalera: ${escaleras}
+- Ascensores: ${ascensores ? "Sí" : "No"}
+- Descripción adicional: ${descripcion || "ninguna"}
 - Zonas bloqueadas o riesgosas: ${bloqueadas || "ninguna"}
-- Salidas de emergencia identificadas: ${salidasDesc}
+- Salidas de emergencia: ${salidasDesc}
 - Rutas de evacuación: ${rutasDesc}
 
-REQUISITOS ESTRICTOS DEL SVG:
-1. Empezar exactamente con <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
-2. Terminar exactamente con </svg>
-3. Fondo del SVG: rectángulo #F8FAFC de 1200×800
-4. Estructura de un piso típico residencial de altura:
-   - Muro perimetral exterior: rectángulo con stroke="#6B7280" stroke-width="4" fill="none", margen 40px
-   - Pasillo central horizontal: rectángulo fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1"
-   - 2 núcleos de escaleras (uno en cada extremo del pasillo): rectángulos fill="#E5E7EB" con label "Escalera"
-   - Shaft de ascensores al centro: rectángulo fill="#E5E7EB" con label "Ascensores"
-   - 6–8 departamentos a cada lado del pasillo: rectángulos fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"
-5. Etiquetas con <text font-family="Arial,sans-serif" font-size="12" fill="#4B5563">
-6. Posicionar las salidas identificadas como pequeños rectángulos verdes fill="#4CBF8C" en los bordes del muro exterior
-7. NO incluir elementos de seguridad (extintores, íconos) — solo la arquitectura base
-8. El plano debe ocupar el área 40,40 a 1160,760
+═══ INSTRUCCIONES DE DISEÑO ═══
+Adapta la distribución al TIPO de edificio:
+- Residencial → departamentos, pasillo central, hall ascensores
+- Oficinas → open space / módulos, sala de reuniones, recepción
+- Hospital → pasillos anchos, habitaciones, nurses station, sala de espera
+- Hotel → habitaciones a ambos lados, pasillo central, escalera de servicio
+- Comercial → locales, pasillo de circulación, zona de carga
+- Industrial → nave central, oficinas laterales, zona de maquinaria
 
-Responde ÚNICAMENTE con el SVG. Sin markdown, sin explicación, sin bloques de código. La primera línea debe ser <svg y la última </svg>.`;
+Adapta la forma al valor indicado:
+- Rectangular → planta alargada estándar
+- Cuadrada → planta cuadrada con núcleo central
+- En L → dos alas conectadas en ángulo de 90°
+- En U → patio interior central, tres alas
+- En T → eje central con ramificaciones
+- Irregular → forma libre pero coherente
+
+═══ REQUISITOS TÉCNICOS DEL SVG ═══
+1. Comenzar exactamente con: <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
+2. Terminar exactamente con: </svg>
+3. Fondo: <rect width="1200" height="800" fill="#F8FAFC"/>
+4. Paleta de colores:
+   - Muros exteriores: stroke="#374151" stroke-width="4" fill="none"
+   - Muros interiores: stroke="#6B7280" stroke-width="2"
+   - Pasillos / circulación: fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1"
+   - Habitaciones / unidades: fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"
+   - Escaleras: fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1.5"
+   - Ascensores: fill="#DBEAFE" stroke="#93C5FD" stroke-width="1.5"
+   - Zonas de riesgo: fill="#FEF3C7" stroke="#FCD34D"
+5. Salidas de emergencia: rectángulos fill="#D1FAE5" stroke="#34D399" stroke-width="2" con label "Salida"
+6. Etiquetas: <text font-family="Arial,sans-serif" font-size="11" fill="#4B5563" text-anchor="middle">
+7. El plano ocupa el área de 40,40 a 1160,760 (margen 40px)
+8. Agrega líneas diagonales cruzadas dentro de los núcleos de escalera (patrón arquitectónico estándar)
+9. NO incluir extintores, íconos de personas ni elementos de seguridad — solo arquitectura
+
+Responde ÚNICAMENTE con el SVG completo. Sin markdown, sin bloques de código, sin texto adicional. Primera línea = <svg ... y última línea = </svg>.`;
 
   const text = await callGemini({
-    max_tokens: 6000,
+    max_tokens: 8000,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
 
@@ -636,6 +677,7 @@ function ApiKeyModal({ onClose }: { onClose: () => void }) {
 /* ─── PDF Review Modal ───────────────────────────────────────── */
 function PdfReviewModal({ extracted, onConfirm, onClose }: {
   extracted: PDFExtracted; onConfirm: () => void; onClose: () => void;
+  // onConfirm now opens the building-details step instead of applying directly
 }) {
   const { edificio, resumen, salidas, extintores, puntos, mangueras, rutas, alertas } = extracted;
 
@@ -739,7 +781,167 @@ function PdfReviewModal({ extracted, onConfirm, onClose }: {
             Cancelar
           </button>
           <button className="btn-primary" onClick={onConfirm} style={{ flex: 2, borderRadius: 12 }}>
-            <CheckCircle size={14} /> Aplicar al editor
+            <ChevronRight size={14} /> Siguiente: detalles del edificio
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ─── Building Details Modal ─────────────────────────────────── */
+function BuildingDetailsModal({
+  prefill, onGenerate, onBack,
+}: {
+  prefill: { nombre?: string; pisos?: string; infoAdicional?: string };
+  onGenerate: (details: BuildingDetails) => void;
+  onBack: () => void;
+}) {
+  const [form, setForm] = useState<BuildingDetails>({
+    nombre:          prefill.nombre          || "",
+    tipo:            "Residencial",
+    pisos:           prefill.pisos           || "",
+    forma:           "Rectangular",
+    unidadesPorPiso: "",
+    escaleras:       "2",
+    tieneAscensores: true,
+    descripcion:     prefill.infoAdicional   || "",
+  });
+
+  const set = (k: keyof BuildingDetails, v: string | boolean) =>
+    setForm((prev) => ({ ...prev, [k]: v }));
+
+  const labelStyle: React.CSSProperties = {
+    display: "block", fontSize: 11, fontWeight: 700, color: C.gray, marginBottom: 4,
+  };
+  const inputStyle: React.CSSProperties = {
+    width: "100%", padding: "8px 12px", borderRadius: 8, border: `1.5px solid ${C.grayLight}`,
+    fontSize: 13, color: C.gray, background: C.white, outline: "none", boxSizing: "border-box",
+  };
+  const selectStyle: React.CSSProperties = { ...inputStyle, cursor: "pointer" };
+  const rowStyle: React.CSSProperties = { display: "flex", gap: 12 };
+
+  return (
+    <div
+      role="dialog" aria-modal="true"
+      style={{
+        position: "fixed", inset: 0, zIndex: 60,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(78,82,110,0.40)", backdropFilter: "blur(6px)", padding: 16,
+      }}
+      onClick={onBack}
+    >
+      <div
+        className="card"
+        style={{ width: "100%", maxWidth: 520, maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ padding: "18px 20px", borderBottom: `1px solid ${C.grayLight}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 12, background: C.blueBg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Sparkles size={18} color={C.blue} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Detalles del edificio</p>
+            <p style={{ margin: 0, fontSize: 11, color: C.grayMid }}>La IA usará esta información para generar un plano más preciso</p>
+          </div>
+          <button className="icon-btn" onClick={onBack}><ArrowLeft size={16} /></button>
+        </div>
+
+        {/* Form */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Nombre y tipo */}
+          <div style={rowStyle}>
+            <div style={{ flex: 2 }}>
+              <label style={labelStyle}>Nombre del edificio</label>
+              <input
+                style={inputStyle} value={form.nombre} placeholder="Ej: Torre Alameda"
+                onChange={(e) => set("nombre", e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label style={labelStyle}>Tipo de edificio</label>
+              <select style={selectStyle} value={form.tipo} onChange={(e) => set("tipo", e.target.value)}>
+                {["Residencial", "Oficinas", "Hospital", "Hotel", "Comercial", "Industrial", "Mixto"].map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Pisos y forma */}
+          <div style={rowStyle}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>N° de pisos</label>
+              <input
+                style={inputStyle} value={form.pisos} placeholder="Ej: 12"
+                onChange={(e) => set("pisos", e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 2 }}>
+              <label style={labelStyle}>Forma de la planta</label>
+              <select style={selectStyle} value={form.forma} onChange={(e) => set("forma", e.target.value)}>
+                {["Rectangular", "Cuadrada", "En L", "En U", "En T", "Irregular"].map((f) => (
+                  <option key={f}>{f}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Unidades y escaleras */}
+          <div style={rowStyle}>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Unidades por piso</label>
+              <input
+                style={inputStyle} value={form.unidadesPorPiso} placeholder="Ej: 8"
+                onChange={(e) => set("unidadesPorPiso", e.target.value)}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Núcleos de escalera</label>
+              <select style={selectStyle} value={form.escaleras} onChange={(e) => set("escaleras", e.target.value)}>
+                <option value="1">1 escalera</option>
+                <option value="2">2 escaleras</option>
+                <option value="3">3 o más</option>
+              </select>
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={labelStyle}>Ascensores</label>
+              <select
+                style={selectStyle}
+                value={form.tieneAscensores ? "si" : "no"}
+                onChange={(e) => set("tieneAscensores", e.target.value === "si")}
+              >
+                <option value="si">Sí</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Descripción libre */}
+          <div>
+            <label style={labelStyle}>Descripción adicional (opcional)</label>
+            <textarea
+              style={{ ...inputStyle, minHeight: 72, resize: "vertical", fontFamily: "inherit" }}
+              value={form.descripcion}
+              placeholder="Ej: Hay un hall de entrada amplio, bodega subterránea, terraza en último piso, lobby doble altura..."
+              onChange={(e) => set("descripcion", e.target.value)}
+            />
+          </div>
+
+          <div style={{ background: C.greenBg, borderRadius: 10, padding: "10px 14px", fontSize: 11, color: C.green, lineHeight: 1.5 }}>
+            ✨ La IA generará el plano arquitectónico usando estos datos. Después podrás ajustar los elementos sobre el plano.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 20px", borderTop: `1px solid ${C.grayLight}`, display: "flex", gap: 10, flexShrink: 0 }}>
+          <button className="btn-outline" onClick={onBack} style={{ flex: 1 }}>
+            <ArrowLeft size={14} /> Volver
+          </button>
+          <button className="btn-primary" onClick={() => onGenerate(form)} style={{ flex: 2, borderRadius: 12 }}>
+            <Sparkles size={14} /> Generar plano
           </button>
         </div>
       </div>
@@ -1451,9 +1653,10 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
 
   const [pdfAnalyzing, setPdfAnalyzing]   = useState(false);
   const [pdfExtracted, setPdfExtracted]   = useState<PDFExtracted | null>(null);
-  const [showPdfReview, setShowPdfReview] = useState(false);
-  const [pdfError, setPdfError]           = useState<string | null>(null);
-  const [generatingPlan, setGeneratingPlan] = useState(false);
+  const [showPdfReview, setShowPdfReview]           = useState(false);
+  const [showBuildingDetails, setShowBuildingDetails] = useState(false);
+  const [pdfError, setPdfError]                     = useState<string | null>(null);
+  const [generatingPlan, setGeneratingPlan]         = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const pdfRef  = useRef<HTMLInputElement>(null);
@@ -1509,12 +1712,19 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     reader.readAsDataURL(file);
   }, []);
 
-  const handleApplyPdf = useCallback(async () => {
+  // Step 1: PDF review → open building details modal
+  const handleOpenBuildingDetails = useCallback(() => {
+    setShowPdfReview(false);
+    setShowBuildingDetails(true);
+  }, []);
+
+  // Step 2: Building details confirmed → apply elements + generate SVG
+  const handleApplyPdf = useCallback(async (details: BuildingDetails) => {
     if (!pdfExtracted) return;
     const { edificio, salidas, extintores, puntos, mangueras, rutas } = pdfExtracted;
-    if (edificio?.nombre) setPlanName(edificio.nombre);
-    if (edificio?.pisos) setFloors(edificio.pisos.toString());
-    if (edificio?.infoAdicional) setExtraInfo(edificio.infoAdicional);
+    setPlanName(details.nombre || edificio?.nombre || "Mi Edificio");
+    setFloors(details.pisos || edificio?.pisos?.toString() || "1");
+    if (details.descripcion) setExtraInfo(details.descripcion);
     if (edificio?.zonasBlockeadas) setBlockedZones(edificio.zonasBlockeadas);
     reset();
     const addEl = (type: string, items?: Array<{ x: number; y: number; label: string; razon?: string }>) => {
@@ -1525,18 +1735,17 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     addEl("punto", puntos);
     addEl("manguera", mangueras);
     (rutas || []).forEach((r) => addRoute(r.points));
-    setShowPdfReview(false);
+    setShowBuildingDetails(false);
     setShowCtx(true);
 
-    // Generar plano arquitectónico con IA usando los datos extraídos
+    // Generar plano arquitectónico con IA usando datos extraídos + detalles del usuario
     setGeneratingPlan(true);
-    setImage(BLANK_CANVAS); // canvas temporal mientras genera
+    setImage(BLANK_CANVAS);
     try {
-      const svgDataUrl = await generateFloorPlanSVG(pdfExtracted);
+      const svgDataUrl = await generateFloorPlanSVG(pdfExtracted, details);
       setImage(svgDataUrl);
     } catch (err) {
       console.error("Error generando plano SVG:", err);
-      // Si falla la generación, dejar el canvas en blanco
     } finally {
       setGeneratingPlan(false);
     }
@@ -2111,8 +2320,19 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
       {showPdfReview && pdfExtracted && (
         <PdfReviewModal
           extracted={pdfExtracted}
-          onConfirm={handleApplyPdf}
+          onConfirm={handleOpenBuildingDetails}
           onClose={() => setShowPdfReview(false)}
+        />
+      )}
+      {showBuildingDetails && pdfExtracted && (
+        <BuildingDetailsModal
+          prefill={{
+            nombre:          pdfExtracted.edificio?.nombre,
+            pisos:           pdfExtracted.edificio?.pisos,
+            infoAdicional:   pdfExtracted.edificio?.infoAdicional,
+          }}
+          onGenerate={handleApplyPdf}
+          onBack={() => { setShowBuildingDetails(false); setShowPdfReview(true); }}
         />
       )}
     </div>
