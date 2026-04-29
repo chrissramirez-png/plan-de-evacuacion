@@ -67,6 +67,20 @@ const TOOLS: Record<string, { id: string; label: string; icon: React.ComponentTy
 
 const CRITICAL_TYPES = new Set(["salida", "punto"]);
 
+/* Canvas en blanco usado cuando se aplica un plan extraído de PDF sin imagen */
+const BLANK_CANVAS_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
+  <rect width="1200" height="800" fill="#F8FAFC"/>
+  <defs>
+    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+      <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#E8EBF0" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="800" fill="url(#grid)"/>
+  <text x="600" y="390" text-anchor="middle" fill="#C4C9D4" font-family="sans-serif" font-size="18" font-weight="600">Plano sin imagen</text>
+  <text x="600" y="416" text-anchor="middle" fill="#C4C9D4" font-family="sans-serif" font-size="13">Sube una imagen del plano para mayor precisión</text>
+</svg>`;
+const BLANK_CANVAS = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(BLANK_CANVAS_SVG)))}`;
+
 const SAMPLE_DETAILS: Record<string, string[]> = {
   extintor: ["Última mantención: Ene 2025", "PQS 6kg — Zona A", "Próx. revisión: Jul 2025"],
   manguera: ["Presión: OK — Rev. Mar 2025", "Longitud: 15m", "Conexión DN 45"],
@@ -1455,9 +1469,11 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     addEl("punto", puntos);
     addEl("manguera", mangueras);
     (rutas || []).forEach((r) => addRoute(r.points));
+    // Si no hay imagen cargada, usar canvas en blanco para entrar directo al editor
+    setImage((prev) => prev ?? BLANK_CANVAS);
     setShowPdfReview(false);
     setShowCtx(true);
-  }, [pdfExtracted, reset, addElement, addRoute]);
+  }, [pdfExtracted, reset, addElement, addRoute, setImage]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
