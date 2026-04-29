@@ -16,6 +16,17 @@
     "metrics": "/api/metrics"
   },
   "env_required": ["HUB_GOOGLE_SA_CREDENTIALS"],
+  "project_info": {
+    "summary": "Herramienta para crear planes de evacuación interactivos con IA para edificios y condominios.",
+    "problem": "Los administradores no tienen una forma fácil de crear y comunicar planes de evacuación claros a los residentes.",
+    "what_it_does": "Permite subir el plano de un edificio o un PDF de plan de emergencia, y la IA sugiere automáticamente ubicaciones de extintores, salidas, rutas y puntos de encuentro. También genera instrucciones personalizadas de evacuación según la ubicación del residente.",
+    "target_users": ["Administradores de edificios", "Comité de seguridad", "Conserjes"],
+    "key_features": ["Análisis de planos con IA (Gemini)", "Análisis de PDFs de planes de emergencia", "Mapa interactivo con arrastrar y soltar", "Instrucciones de evacuación personalizadas", "Compartir plan con código único"],
+    "architecture": "Next.js 15 + Supabase + Gemini AI (Service Account Hub)",
+    "dependencies": ["Gemini API", "Supabase"],
+    "status": "beta",
+    "tags": ["evacuación", "seguridad", "IA", "edificios", "condominios"]
+  },
   "sidebar_nav": [
     {
       "label": "Inicio",
