@@ -1,19 +1,36 @@
-# Dependencias
+# dependencies
 node_modules/
 
-# Variables de entorno (¡contiene API keys!)
+# next.js
+.next/
+out/
+dist/
+
+# env files
 .env
 .env.local
 .env.*.local
 
-# Build
-dist/
-build/
-
-# Logs
-*.log
+# debug
 npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
 
-# Sistema operativo
+# misc
 .DS_Store
-Thumbs.db
+
+# ide
+.idea/
+*.swp
+*.swo
+
+# turbopack
+.turbo/
+
+# vercel
+.vercel
+
+# typescript
+*.tsbuildinfo
+next-env.d.ts
