@@ -223,84 +223,61 @@ Reglas:
 async function generateFloorPlanSVG(extracted: PDFExtracted, details?: BuildingDetails): Promise<string> {
   const ed = extracted.edificio || {};
 
-  // Merge: details (from user) override extracted (from PDF)
-  const nombre     = details?.nombre          || ed.nombre          || "Edificio";
-  const tipo       = details?.tipo            || "Residencial";
-  const pisos      = details?.pisos           || ed.pisos            || "varios";
-  const forma      = details?.forma           || "Rectangular";
-  const unidades   = details?.unidadesPorPiso || "";
-  const escaleras  = details?.escaleras       || "2";
-  const ascensores = details?.tieneAscensores !== false;
-  const descripcion = details?.descripcion    || ed.infoAdicional    || "";
-  const bloqueadas = ed.zonasBlockeadas || "";
+  const nombre      = details?.nombre          || ed.nombre          || "Edificio";
+  const tipo        = details?.tipo            || "Residencial";
+  const pisos       = details?.pisos           || ed.pisos            || "varios";
+  const forma       = details?.forma           || "Rectangular";
+  const unidades    = details?.unidadesPorPiso ? `${details.unidadesPorPiso} unidades por piso` : "";
+  const escaleras   = details?.escaleras       || "2";
+  const ascensores  = details?.tieneAscensores !== false ? "con ascensores" : "sin ascensores";
+  const descripcion = details?.descripcion     || ed.infoAdicional    || "";
 
-  const salidasDesc = (extracted.salidas || [])
-    .map((s) => `"${s.label}" (aprox. x=${s.x}% y=${s.y}%)`)
-    .join(", ") || "según norma";
+  const salidas = (extracted.salidas || []).map((s) => s.label).join(", ") || "no identificadas";
 
-  const rutasDesc = (extracted.rutas || [])
-    .map((r) => r.label)
-    .join(", ") || "sin información";
+  // Diseño específico por tipo de edificio
+  const disenoTipo: Record<string, string> = {
+    Residencial:  "departamentos a ambos lados del pasillo, hall de ascensores central, cuarto de basura",
+    Oficinas:     "open space con cubiculos, sala de reuniones, recepcion, kitchenette, sala de servidores",
+    Hospital:     "habitaciones de pacientes a ambos lados, nurses station central, sala de espera, deposito",
+    Hotel:        "habitaciones con bano a ambos lados del pasillo, cuarto de limpieza, bodega de ropa",
+    Comercial:    "locales comerciales con vitrinas hacia pasillo central, zona de carga trasera, banos",
+    Industrial:   "nave central de produccion, oficinas laterales, zona de maquinaria, bodega de materiales",
+    Mixto:        "mix de espacios residenciales y comerciales con pasillo de acceso compartido",
+  };
 
-  const prompt = `Eres un arquitecto técnico especialista en planos de planta. Genera el plano esquemático de UN PISO TÍPICO de este edificio en formato SVG.
+  const distribDesc = disenoTipo[tipo] || disenoTipo.Residencial;
 
-═══ DATOS DEL EDIFICIO ═══
-- Nombre: ${nombre}
-- Tipo: ${tipo}
-- Número de pisos: ${pisos}
-- Forma de la planta: ${forma}
-- Unidades / oficinas por piso: ${unidades || "no especificado"}
-- Núcleos de escalera: ${escaleras}
-- Ascensores: ${ascensores ? "Sí" : "No"}
-- Descripción adicional: ${descripcion || "ninguna"}
-- Zonas bloqueadas o riesgosas: ${bloqueadas || "ninguna"}
-- Salidas de emergencia: ${salidasDesc}
-- Rutas de evacuación: ${rutasDesc}
+  const prompt = `Genera un plano arquitectonico SVG de planta de un piso de un edificio.
 
-═══ INSTRUCCIONES DE DISEÑO ═══
-Adapta la distribución al TIPO de edificio:
-- Residencial → departamentos, pasillo central, hall ascensores
-- Oficinas → open space / módulos, sala de reuniones, recepción
-- Hospital → pasillos anchos, habitaciones, nurses station, sala de espera
-- Hotel → habitaciones a ambos lados, pasillo central, escalera de servicio
-- Comercial → locales, pasillo de circulación, zona de carga
-- Industrial → nave central, oficinas laterales, zona de maquinaria
+EDIFICIO: ${nombre} | Tipo: ${tipo} | Pisos: ${pisos} | Forma: ${forma} | ${unidades} | ${escaleras} nucleos de escalera | ${ascensores}
+DISTRIBUCION: ${distribDesc}
+${descripcion ? `NOTAS: ${descripcion}` : ""}
+SALIDAS DE EMERGENCIA: ${salidas}
 
-Adapta la forma al valor indicado:
-- Rectangular → planta alargada estándar
-- Cuadrada → planta cuadrada con núcleo central
-- En L → dos alas conectadas en ángulo de 90°
-- En U → patio interior central, tres alas
-- En T → eje central con ramificaciones
-- Irregular → forma libre pero coherente
+INSTRUCCIONES:
+- Genera el plano completo de UN PISO TIPICO adaptado al tipo "${tipo}" con forma "${forma}"
+- Fondo gris claro, paredes en gris oscuro, habitaciones en blanco, pasillos en gris muy claro
+- Escaleras con patron diagonal (lineas cruzadas), ascensores en azul claro
+- Salidas de emergencia como rectangulos verdes en los bordes del perimetro
+- Etiquetas de texto simples en cada espacio
+- Plano bien distribuido que ocupe casi todo el area visible
 
-═══ REQUISITOS TÉCNICOS DEL SVG ═══
-1. Comenzar exactamente con: <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
-2. Terminar exactamente con: </svg>
-3. Fondo: <rect width="1200" height="800" fill="#F8FAFC"/>
-4. Paleta de colores:
-   - Muros exteriores: stroke="#374151" stroke-width="4" fill="none"
-   - Muros interiores: stroke="#6B7280" stroke-width="2"
-   - Pasillos / circulación: fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1"
-   - Habitaciones / unidades: fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"
-   - Escaleras: fill="#E5E7EB" stroke="#9CA3AF" stroke-width="1.5"
-   - Ascensores: fill="#DBEAFE" stroke="#93C5FD" stroke-width="1.5"
-   - Zonas de riesgo: fill="#FEF3C7" stroke="#FCD34D"
-5. Salidas de emergencia: rectángulos fill="#D1FAE5" stroke="#34D399" stroke-width="2" con label "Salida"
-6. Etiquetas: <text font-family="Arial,sans-serif" font-size="11" fill="#4B5563" text-anchor="middle">
-7. El plano ocupa el área de 40,40 a 1160,760 (margen 40px)
-8. Agrega líneas diagonales cruzadas dentro de los núcleos de escalera (patrón arquitectónico estándar)
-9. NO incluir extintores, íconos de personas ni elementos de seguridad — solo arquitectura
+FORMATO OBLIGATORIO: responde SOLO con el SVG, sin markdown, sin explicacion.
+El SVG debe comenzar con: <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
+El SVG debe terminar con: </svg>`;
 
-Responde ÚNICAMENTE con el SVG completo. Sin markdown, sin bloques de código, sin texto adicional. Primera línea = <svg ... y última línea = </svg>.`;
-
-  const text = await callGemini({
-    max_tokens: 8000,
+  const raw = await callGemini({
+    max_tokens: 6000,
     messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
 
-  const svgMatch = text.match(/<svg[\s\S]*?<\/svg>/i);
-  if (!svgMatch) throw new Error("No se pudo generar el plano SVG");
+  // Strip markdown code fences if Gemini added them (```svg ... ``` or ```xml ... ```)
+  const cleaned = raw.replace(/^```(?:svg|xml|html)?\s*/i, "").replace(/\s*```\s*$/i, "").trim();
+
+  // Greedy match to capture the full SVG including the closing tag
+  const svgMatch = cleaned.match(/<svg[\s\S]*<\/svg>/i);
+  if (!svgMatch) throw new Error(`Gemini no devolvió SVG válido. Respuesta: ${cleaned.slice(0, 200)}`);
+
   const svgCode = svgMatch[0];
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgCode)))}`;
 }
@@ -1657,6 +1634,8 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
   const [showBuildingDetails, setShowBuildingDetails] = useState(false);
   const [pdfError, setPdfError]                     = useState<string | null>(null);
   const [generatingPlan, setGeneratingPlan]         = useState(false);
+  const [planGenError, setPlanGenError]             = useState<string | null>(null);
+  const [lastDetails, setLastDetails]               = useState<BuildingDetails | null>(null);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const pdfRef  = useRef<HTMLInputElement>(null);
@@ -1739,13 +1718,17 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     setShowCtx(true);
 
     // Generar plano arquitectónico con IA usando datos extraídos + detalles del usuario
+    setLastDetails(details);
+    setPlanGenError(null);
     setGeneratingPlan(true);
     setImage(BLANK_CANVAS);
     try {
       const svgDataUrl = await generateFloorPlanSVG(pdfExtracted, details);
       setImage(svgDataUrl);
     } catch (err) {
-      console.error("Error generando plano SVG:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error("Error generando plano SVG:", msg);
+      setPlanGenError(msg);
     } finally {
       setGeneratingPlan(false);
     }
@@ -2291,6 +2274,38 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
                   <Loader2 size={36} color={C.blue} className="spin" />
                   <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: C.gray }}>Generando plano con IA...</p>
                   <p style={{ margin: 0, fontSize: 12, color: C.grayMid }}>Esto puede tomar unos segundos</p>
+                </div>
+              )}
+              {!generatingPlan && planGenError && (
+                <div style={{
+                  position: "absolute", inset: 0, background: "rgba(248,250,252,0.92)",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, zIndex: 10, padding: 32,
+                }}>
+                  <AlertTriangle size={36} color={C.red} />
+                  <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: C.gray, textAlign: "center" }}>No se pudo generar el plano</p>
+                  <p style={{ margin: 0, fontSize: 11, color: C.grayMid, textAlign: "center", maxWidth: 340 }}>{planGenError}</p>
+                  <button
+                    className="btn-primary"
+                    style={{ marginTop: 4 }}
+                    onClick={async () => {
+                      if (!pdfExtracted || !lastDetails) return;
+                      setPlanGenError(null);
+                      setGeneratingPlan(true);
+                      try {
+                        const svgDataUrl = await generateFloorPlanSVG(pdfExtracted, lastDetails);
+                        setImage(svgDataUrl);
+                      } catch (err) {
+                        setPlanGenError(err instanceof Error ? err.message : String(err));
+                      } finally {
+                        setGeneratingPlan(false);
+                      }
+                    }}
+                  >
+                    <RefreshCw size={14} /> Reintentar
+                  </button>
+                  <button className="btn-outline" style={{ fontSize: 12 }} onClick={() => setPlanGenError(null)}>
+                    Continuar sin plano
+                  </button>
                 </div>
               )}
               <RouteLayer
