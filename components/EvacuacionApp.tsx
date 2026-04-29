@@ -209,6 +209,61 @@ Reglas:
   return JSON.parse(jsonMatch[0]);
 }
 
+/* ─── AI: generate floor plan SVG from PDF ───────────────────── */
+async function generateFloorPlanSVG(extracted: PDFExtracted): Promise<string> {
+  const ed = extracted.edificio || {};
+  const nombre   = ed.nombre        || "Edificio residencial";
+  const pisos    = ed.pisos         || "varios pisos";
+  const extra    = ed.infoAdicional || "";
+  const bloqueadas = ed.zonasBlockeadas || "";
+
+  // Describe salidas y rutas identificadas para que el SVG las refleje
+  const salidasDesc = (extracted.salidas || [])
+    .map((s) => `"${s.label}" aprox. ${s.x}% horizontal / ${s.y}% vertical`)
+    .join(", ") || "sin información";
+
+  const rutasDesc = (extracted.rutas || [])
+    .map((r) => r.label)
+    .join(", ") || "sin información";
+
+  const prompt = `Eres un arquitecto técnico. Genera un plano esquemático de la PLANTA TÍPICA de este edificio en SVG.
+
+DATOS DEL EDIFICIO:
+- Nombre: ${nombre}
+- Pisos: ${pisos}
+- Info adicional: ${extra || "ninguna"}
+- Zonas bloqueadas o riesgosas: ${bloqueadas || "ninguna"}
+- Salidas de emergencia identificadas: ${salidasDesc}
+- Rutas de evacuación: ${rutasDesc}
+
+REQUISITOS ESTRICTOS DEL SVG:
+1. Empezar exactamente con <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
+2. Terminar exactamente con </svg>
+3. Fondo del SVG: rectángulo #F8FAFC de 1200×800
+4. Estructura de un piso típico residencial de altura:
+   - Muro perimetral exterior: rectángulo con stroke="#6B7280" stroke-width="4" fill="none", margen 40px
+   - Pasillo central horizontal: rectángulo fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1"
+   - 2 núcleos de escaleras (uno en cada extremo del pasillo): rectángulos fill="#E5E7EB" con label "Escalera"
+   - Shaft de ascensores al centro: rectángulo fill="#E5E7EB" con label "Ascensores"
+   - 6–8 departamentos a cada lado del pasillo: rectángulos fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"
+5. Etiquetas con <text font-family="Arial,sans-serif" font-size="12" fill="#4B5563">
+6. Posicionar las salidas identificadas como pequeños rectángulos verdes fill="#4CBF8C" en los bordes del muro exterior
+7. NO incluir elementos de seguridad (extintores, íconos) — solo la arquitectura base
+8. El plano debe ocupar el área 40,40 a 1160,760
+
+Responde ÚNICAMENTE con el SVG. Sin markdown, sin explicación, sin bloques de código. La primera línea debe ser <svg y la última </svg>.`;
+
+  const text = await callGemini({
+    max_tokens: 6000,
+    messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
+  });
+
+  const svgMatch = text.match(/<svg[\s\S]*?<\/svg>/i);
+  if (!svgMatch) throw new Error("No se pudo generar el plano SVG");
+  const svgCode = svgMatch[0];
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgCode)))}`;
+}
+
 /* ─── AI: emergency plan PDF analysis ───────────────────────── */
 async function analyzeEmergencyPlanPDF(pdfDataUrl: string): Promise<PDFExtracted> {
   const { data } = parseDataUrl(pdfDataUrl);
@@ -1398,6 +1453,7 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
   const [pdfExtracted, setPdfExtracted]   = useState<PDFExtracted | null>(null);
   const [showPdfReview, setShowPdfReview] = useState(false);
   const [pdfError, setPdfError]           = useState<string | null>(null);
+  const [generatingPlan, setGeneratingPlan] = useState(false);
 
   const fileRef = useRef<HTMLInputElement>(null);
   const pdfRef  = useRef<HTMLInputElement>(null);
@@ -1453,7 +1509,7 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     reader.readAsDataURL(file);
   }, []);
 
-  const handleApplyPdf = useCallback(() => {
+  const handleApplyPdf = useCallback(async () => {
     if (!pdfExtracted) return;
     const { edificio, salidas, extintores, puntos, mangueras, rutas } = pdfExtracted;
     if (edificio?.nombre) setPlanName(edificio.nombre);
@@ -1469,10 +1525,21 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     addEl("punto", puntos);
     addEl("manguera", mangueras);
     (rutas || []).forEach((r) => addRoute(r.points));
-    // Si no hay imagen cargada, usar canvas en blanco para entrar directo al editor
-    setImage((prev) => prev ?? BLANK_CANVAS);
     setShowPdfReview(false);
     setShowCtx(true);
+
+    // Generar plano arquitectónico con IA usando los datos extraídos
+    setGeneratingPlan(true);
+    setImage(BLANK_CANVAS); // canvas temporal mientras genera
+    try {
+      const svgDataUrl = await generateFloorPlanSVG(pdfExtracted);
+      setImage(svgDataUrl);
+    } catch (err) {
+      console.error("Error generando plano SVG:", err);
+      // Si falla la generación, dejar el canvas en blanco
+    } finally {
+      setGeneratingPlan(false);
+    }
   }, [pdfExtracted, reset, addElement, addRoute, setImage]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -2007,6 +2074,16 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
                 style={{ width: "100%", height: "100%", objectFit: "contain", userSelect: "none" }}
                 draggable={false}
               />
+              {generatingPlan && (
+                <div style={{
+                  position: "absolute", inset: 0, background: "rgba(248,250,252,0.88)",
+                  display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, zIndex: 10,
+                }}>
+                  <Loader2 size={36} color={C.blue} className="spin" />
+                  <p style={{ margin: 0, fontSize: 15, fontWeight: 600, color: C.gray }}>Generando plano con IA...</p>
+                  <p style={{ margin: 0, fontSize: 12, color: C.grayMid }}>Esto puede tomar unos segundos</p>
+                </div>
+              )}
               <RouteLayer
                 routes={routes} currentRoute={currentRoute}
                 routeColor={routeColor} emergency={emergency} markerId="arrA"
