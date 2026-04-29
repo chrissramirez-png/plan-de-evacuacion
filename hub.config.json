@@ -15,7 +15,7 @@
     "metrics_menu": "/api/metrics/menu",
     "metrics": "/api/metrics"
   },
-  "env_required": ["GEMINI_API_KEY"],
+  "env_required": ["HUB_GOOGLE_SA_CREDENTIALS"],
   "sidebar_nav": [
     {
       "label": "Inicio",

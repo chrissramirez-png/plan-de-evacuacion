@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
+import { callGeminiRaw } from "@/lib/gemini";
 
 // POST /api/gemini — Proxy para Gemini API
-// El frontend envía contents y generationConfig; este endpoint los reenvía a la API de Gemini
-// con la API key guardada como variable de entorno (GEMINI_API_KEY)
+// Usa HUB_GOOGLE_SA_CREDENTIALS (Service Account) para autenticarse.
+// El frontend envía { contents, generationConfig } en formato Gemini estándar.
 export async function POST(request: Request) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
+  if (!process.env.HUB_GOOGLE_SA_CREDENTIALS) {
     return NextResponse.json(
-      { error: "GEMINI_API_KEY no configurada en el servidor" },
+      { error: "HUB_GOOGLE_SA_CREDENTIALS no configurada en el servidor" },
       { status: 500 },
     );
   }
 
-  let body: unknown;
+  let body: { contents: unknown; generationConfig?: unknown; model?: string };
   try {
     body = await request.json();
   } catch {
@@ -20,26 +20,14 @@ export async function POST(request: Request) {
   }
 
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
+    const data = await callGeminiRaw(
+      { contents: body.contents as never, generationConfig: body.generationConfig as never },
+      body.model,
     );
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      return NextResponse.json(
-        { error: data?.error?.message || "Error de Gemini API" },
-        { status: res.status },
-      );
-    }
-
     return NextResponse.json(data);
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    const status = message.includes("401") || message.includes("403") ? 401 : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }
