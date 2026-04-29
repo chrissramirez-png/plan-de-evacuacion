@@ -1,0 +1,83 @@
+name: Validacion Seguridad
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  shared:
+    uses: ComunidadFeliz-Interno/cf-app-template/.github/workflows/validate-reusable.yml@main
+
+  hub-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate hub.config.json exists
+        run: test -f hub.config.json
+
+      - name: Validate required fields
+        run: |
+          for field in name description type visibility owner; do
+            value=$(node -e "const c=require('./hub.config.json'); console.log(c.$field || '')")
+            if [ -z "$value" ]; then
+              echo "❌ hub.config.json: campo '$field' vacio o ausente"
+              exit 1
+            fi
+          done
+
+      - name: Validate type
+        run: |
+          type=$(node -e "console.log(require('./hub.config.json').type)")
+          if [[ ! "$type" =~ ^(frontend|api|slack_bot|cron)$ ]]; then
+            echo "❌ type debe ser: frontend, api, slack_bot, cron"
+            exit 1
+          fi
+
+      - name: Validate endpoints
+        run: |
+          for ep in health metrics_menu metrics; do
+            value=$(node -e "const c=require('./hub.config.json'); console.log(c.endpoints?.$ep || '')")
+            if [ -z "$value" ]; then
+              echo "❌ endpoint '$ep' no definido"
+              exit 1
+            fi
+          done
+
+      - name: Validate owner domain
+        run: |
+          owner=$(node -e "console.log(require('./hub.config.json').owner)")
+          if [[ ! "$owner" =~ @comunidadfeliz\.cl$ ]] && [[ ! "$owner" =~ ^CAMBIAR ]]; then
+            echo "❌ owner debe ser email @comunidadfeliz.cl"
+            exit 1
+          fi
+
+      - name: Skip CAMBIAR check for template
+        run: |
+          if grep -q "CAMBIAR" hub.config.json; then
+            echo "⚠️  hub.config.json contiene CAMBIAR — skipping validation (template mode)"
+          fi
+
+  project-skills:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate project skills
+        run: |
+          required_files=(
+            "skills/project/READING_ORDER.md"
+            "skills/project/01-arquitectura.md"
+            "skills/project/02-endpoints.md"
+            "skills/project/03-seguridad-app.md"
+            "skills/project/04-deploy.md"
+          )
+          for f in "${required_files[@]}"; do
+            if [ ! -f "$f" ]; then
+              echo "❌ Falta: $f"
+              exit 1
+            fi
+          done
+          echo "✅ Project skills presentes"
