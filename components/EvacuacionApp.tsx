@@ -211,42 +211,55 @@ Reglas:
 
 /* ─── AI: emergency plan PDF analysis ───────────────────────── */
 /* ─── AI: generate floor plan SVG from PDF ───────────────────── */
-async function generateFloorPlanSVG(pdfDataUrl: string, extracted: PDFExtracted): Promise<string> {
-  const { data } = parseDataUrl(pdfDataUrl);
-  const buildingDesc = [
-    extracted.edificio?.nombre && `Edificio: ${extracted.edificio.nombre}`,
-    extracted.edificio?.pisos && `Pisos: ${extracted.edificio.pisos}`,
-    extracted.edificio?.infoAdicional,
-  ].filter(Boolean).join(". ") || "Edificio residencial";
+async function generateFloorPlanSVG(extracted: PDFExtracted): Promise<string> {
+  const ed = extracted.edificio || {};
+  const nombre   = ed.nombre        || "Edificio residencial";
+  const pisos    = ed.pisos         || "varios pisos";
+  const extra    = ed.infoAdicional || "";
+  const bloqueadas = ed.zonasBlockeadas || "";
+
+  // Describe salidas y rutas identificadas para que el SVG las refleje
+  const salidasDesc = (extracted.salidas || [])
+    .map((s) => `"${s.label}" aprox. ${s.x}% horizontal / ${s.y}% vertical`)
+    .join(", ") || "sin información";
+
+  const rutasDesc = (extracted.rutas || [])
+    .map((r) => r.label)
+    .join(", ") || "sin información";
+
+  const prompt = `Eres un arquitecto técnico. Genera un plano esquemático de la PLANTA TÍPICA de este edificio en SVG.
+
+DATOS DEL EDIFICIO:
+- Nombre: ${nombre}
+- Pisos: ${pisos}
+- Info adicional: ${extra || "ninguna"}
+- Zonas bloqueadas o riesgosas: ${bloqueadas || "ninguna"}
+- Salidas de emergencia identificadas: ${salidasDesc}
+- Rutas de evacuación: ${rutasDesc}
+
+REQUISITOS ESTRICTOS DEL SVG:
+1. Empezar exactamente con <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800">
+2. Terminar exactamente con </svg>
+3. Fondo del SVG: rectángulo #F8FAFC de 1200×800
+4. Estructura de un piso típico residencial de altura:
+   - Muro perimetral exterior: rectángulo con stroke="#6B7280" stroke-width="4" fill="none", margen 40px
+   - Pasillo central horizontal: rectángulo fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1"
+   - 2 núcleos de escaleras (uno en cada extremo del pasillo): rectángulos fill="#E5E7EB" con label "Escalera"
+   - Shaft de ascensores al centro: rectángulo fill="#E5E7EB" con label "Ascensores"
+   - 6–8 departamentos a cada lado del pasillo: rectángulos fill="#FFFFFF" stroke="#D1D5DB" stroke-width="1.5"
+5. Etiquetas con <text font-family="Arial,sans-serif" font-size="12" fill="#4B5563">
+6. Posicionar las salidas identificadas como pequeños rectángulos verdes fill="#4CBF8C" en los bordes del muro exterior
+7. NO incluir elementos de seguridad (extintores, íconos) — solo la arquitectura base
+8. El plano debe ocupar el área 40,40 a 1160,760
+
+Responde ÚNICAMENTE con el SVG. Sin markdown, sin explicación, sin bloques de código. La primera línea debe ser <svg y la última </svg>.`;
 
   const text = await callGemini({
-    max_tokens: 4000,
-    messages: [{
-      role: "user",
-      content: [
-        { type: "document", source: { type: "base64", media_type: "application/pdf", data } },
-        {
-          type: "text",
-          text: `Basándote en este plan de emergencia, genera un plano esquemático de UN PISO TÍPICO en formato SVG.
-
-Información del edificio: ${buildingDesc}
-
-REQUISITOS DEL SVG:
-- width="1200" height="800" con xmlns="http://www.w3.org/2000/svg"
-- Dibuja la planta del piso: pasillos centrales, escaleras, shaft de ascensores, departamentos esquematizados como rectángulos
-- Colores: fondo #F8FAFC, paredes #6B7280 (stroke, no fill), habitaciones/deptos #FFFFFF con stroke #D1D5DB, pasillos #F3F4F6, escaleras #E5E7EB con texto
-- Grosor de paredes: stroke-width="3" para muros exteriores, stroke-width="1.5" para interiores
-- Agrega etiquetas de texto simples: "Pasillo", "Escalera Norte", "Escalera Sur", "Ascensores", "Depto", etc.
-- El plano debe ocupar casi todo el SVG, con margen de ~40px
-- Sé preciso con la distribución típica de un edificio residencial de altura
-
-Responde ÚNICAMENTE con el código SVG completo, empezando exactamente con <svg y terminando con </svg>. Sin markdown, sin bloques de código, sin texto adicional.`,
-        },
-      ],
-    }],
+    max_tokens: 6000,
+    messages: [{ role: "user", content: [{ type: "text", text: prompt }] }],
   });
 
-  const svgMatch = text.match(/<svg[\s\S]*<\/svg>/i);
+  const svgMatch = text.match(/<svg[\s\S]*?<\/svg>/i);
   if (!svgMatch) throw new Error("No se pudo generar el plano SVG");
   const svgCode = svgMatch[0];
   return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgCode)))}`;
@@ -1518,22 +1531,19 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
     setShowPdfReview(false);
     setShowCtx(true);
 
-    // Generar plano con IA a partir del PDF
-    if (pdfDataUrl) {
-      setGeneratingPlan(true);
-      setImage(BLANK_CANVAS); // canvas temporal mientras genera
-      try {
-        const svgDataUrl = await generateFloorPlanSVG(pdfDataUrl, pdfExtracted);
-        setImage(svgDataUrl);
-      } catch {
-        // Si falla la generación, dejar el canvas en blanco
-      } finally {
-        setGeneratingPlan(false);
-      }
-    } else {
-      setImage((prev) => prev ?? BLANK_CANVAS);
+    // Generar plano arquitectónico con IA usando los datos extraídos
+    setGeneratingPlan(true);
+    setImage(BLANK_CANVAS); // canvas temporal mientras genera
+    try {
+      const svgDataUrl = await generateFloorPlanSVG(pdfExtracted);
+      setImage(svgDataUrl);
+    } catch (err) {
+      console.error("Error generando plano SVG:", err);
+      // Si falla la generación, dejar el canvas en blanco
+    } finally {
+      setGeneratingPlan(false);
     }
-  }, [pdfExtracted, pdfDataUrl, reset, addElement, addRoute, setImage]);
+  }, [pdfExtracted, reset, addElement, addRoute, setImage]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
