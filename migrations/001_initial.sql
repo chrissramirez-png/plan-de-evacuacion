@@ -41,6 +41,36 @@ CREATE POLICY "profiles_update" ON plan_evacuacion.profiles FOR UPDATE USING (au
 -- 6. Grants por tabla
 GRANT SELECT, INSERT, UPDATE ON plan_evacuacion.profiles TO authenticated;
 
+-- ── Plans table ─────────────────────────────────────────────────
+-- Almacena planes de evacuación publicados, accesibles por código único.
+CREATE TABLE IF NOT EXISTS plan_evacuacion.plans (
+  id         uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  code       text        UNIQUE NOT NULL,
+  name       text        NOT NULL DEFAULT 'Plan de Evacuación',
+  data       jsonb       NOT NULL,
+  created_by uuid        REFERENCES auth.users(id) ON DELETE SET NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE plan_evacuacion.plans ENABLE ROW LEVEL SECURITY;
+
+-- Cualquier rol puede leer un plan por código (residentes via link)
+DROP POLICY IF EXISTS "plans_select" ON plan_evacuacion.plans;
+CREATE POLICY "plans_select" ON plan_evacuacion.plans FOR SELECT USING (true);
+
+-- Solo usuarios autenticados pueden crear/actualizar planes
+DROP POLICY IF EXISTS "plans_insert" ON plan_evacuacion.plans;
+CREATE POLICY "plans_insert" ON plan_evacuacion.plans FOR INSERT
+  WITH CHECK (auth.uid() IS NOT NULL);
+
+DROP POLICY IF EXISTS "plans_update" ON plan_evacuacion.plans;
+CREATE POLICY "plans_update" ON plan_evacuacion.plans FOR UPDATE
+  USING (created_by = auth.uid() OR auth.uid() IS NOT NULL);
+
+GRANT SELECT ON plan_evacuacion.plans TO anon;
+GRANT SELECT, INSERT, UPDATE ON plan_evacuacion.plans TO authenticated, service_role;
+
 -- 7. Storage (opcional — si tu app necesita subir archivos):
 -- Crear buckets con el prefijo del slug de tu app para evitar colisiones.
 -- Ejemplo: bucket para fotos y otro para documentos.

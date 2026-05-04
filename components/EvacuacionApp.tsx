@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Flame, Droplets, DoorOpen, Users, Route, Eye, EyeOff,
   AlertTriangle, X, MapPin, CheckCircle, Copy,
@@ -470,10 +471,18 @@ function useMapEditor() {
     counterRef.current = 1;
   }, []);
 
+  const loadPlan = useCallback((els: Element[], rts: RouteItem[]) => {
+    setElements(els);
+    setRoutes(rts);
+    setCurrentRoute(null);
+    setActiveTool(null);
+    counterRef.current = (els.length > 0 ? Math.max(...els.map((e) => e.num)) + 1 : 1);
+  }, []);
+
   return {
     elements, routes, activeTool, currentRoute,
     canvasRef, handleCanvasClick, finishRoute,
-    removeElement, removeRoute, selectTool, reset, addElement, addRoute,
+    removeElement, removeRoute, selectTool, reset, addElement, addRoute, loadPlan,
   };
 }
 
@@ -1122,7 +1131,7 @@ function ResidentView({ plan, onBack }: { plan: Plan; onBack: () => void }) {
   );
 
   return (
-    <div className="app-root" style={{ display: "flex", flexDirection: "column" }}>
+    <div className="app-root" style={{ display: "flex", flexDirection: "column", position: "fixed", inset: 0, zIndex: 60 }}>
       <header style={{
         display: "flex", alignItems: "center", gap: 12,
         padding: "12px 20px", background: "white",
@@ -1318,14 +1327,28 @@ function ResidentView({ plan, onBack }: { plan: Plan; onBack: () => void }) {
 
 /* ════ ENTRY SCREEN ═════════════════════════════════════════════ */
 function EntryScreen({ onAdmin, onResident }: {
-  onAdmin: () => void;
+  onAdmin: (plan?: Plan, draftId?: string) => void;
   onResident: (plan: Plan, code: string) => void;
 }) {
   const [code, setCode]             = useState("");
   const [err, setErr]               = useState("");
   const [loading, setLoading]       = useState(false);
-  const [savedPlans, setSavedPlans] = useState<Array<{ code: string; name: string; date: string; _data: Plan }> | null>(null);
-  const [recovering, setRecovering] = useState(false);
+  const [drafts, setDrafts]         = useState<Array<{ draftId: string; name: string; savedAt: string; _data: Plan }>>([]);
+
+  // Load admin drafts from localStorage on mount
+  useEffect(() => {
+    try {
+      const indexRaw = storage.get("drafts:index");
+      if (!indexRaw) return;
+      const index: Array<{ draftId: string; name: string; savedAt: string }> = JSON.parse(indexRaw);
+      const loaded = index.map((entry) => {
+        const raw = storage.get(`draft:${entry.draftId}`);
+        if (!raw) return null;
+        return { ...entry, _data: JSON.parse(raw) as Plan };
+      }).filter(Boolean) as Array<{ draftId: string; name: string; savedAt: string; _data: Plan }>;
+      setDrafts(loaded);
+    } catch { /* ignore */ }
+  }, []);
 
   const handleJoin = useCallback(async () => {
     const c = code.trim().toUpperCase();
@@ -1333,40 +1356,22 @@ function EntryScreen({ onAdmin, onResident }: {
     setLoading(true);
     setErr("");
     try {
+      // Try Supabase first, fallback to localStorage cache
+      const res = await fetch(`/api/plans/${c}`);
+      if (res.ok) {
+        const { data } = await res.json();
+        onResident(data, c);
+        return;
+      }
       const val = storage.get(`plan:${c}`);
-      if (!val) { setErr("Código no encontrado."); return; }
-      onResident(JSON.parse(val), c);
+      if (val) { onResident(JSON.parse(val), c); return; }
+      setErr("Plan no encontrado. Verifica el código.");
     } catch {
-      setErr("Código no encontrado.");
+      setErr("Error de conexión. Intenta de nuevo.");
     } finally {
       setLoading(false);
     }
   }, [code, onResident]);
-
-  const handleRecover = useCallback(async () => {
-    setRecovering(true);
-    setSavedPlans(null);
-    try {
-      const keys = storage.list("plan:");
-      const plans = keys.map((k) => {
-        try {
-          const val  = storage.get(k);
-          const data = val ? JSON.parse(val) : null;
-          return {
-            code:  k.replace("plan:", ""),
-            name:  data?.name || "Sin nombre",
-            date:  data?.publishedAt ? new Date(data.publishedAt).toLocaleDateString("es-CL") : "—",
-            _data: data,
-          };
-        } catch { return null; }
-      }).filter(Boolean) as Array<{ code: string; name: string; date: string; _data: Plan }>;
-      setSavedPlans(plans);
-    } catch {
-      setSavedPlans([]);
-    } finally {
-      setRecovering(false);
-    }
-  }, []);
 
   return (
     <div className="app-root" style={{
@@ -1446,48 +1451,40 @@ function EntryScreen({ onAdmin, onResident }: {
           >
             {loading ? <><RefreshCw size={13} className="spin" />Buscando…</> : "Ver Plan de Evacuación"}
           </button>
-          <button
-            onClick={handleRecover}
-            disabled={recovering}
-            style={{
-              width: "100%", background: "none", border: "none", cursor: "pointer",
-              color: C.grayMid, fontSize: 11, fontWeight: 500, padding: "8px",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              gap: 6, fontFamily: "inherit", marginTop: 2,
-            }}
-          >
-            {recovering
-              ? <><RefreshCw size={11} className="spin" />Buscando…</>
-              : <><RefreshCw size={11} />No recuerdo mi código — Recuperar</>
-            }
-          </button>
         </div>
 
-        {savedPlans !== null && (
+        {/* Admin drafts */}
+        {drafts.length > 0 && (
           <div className="card" style={{ padding: 16, marginBottom: 14 }}>
-            <p className="sidebar-label" style={{ marginBottom: 10 }}>
-              {savedPlans.length > 0 ? `${savedPlans.length} plan(es) encontrado(s)` : "Sin planes guardados."}
+            <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 700, color: C.grayMid, textTransform: "uppercase", letterSpacing: 0.5 }}>
+              📝 Borradores guardados
             </p>
-            {savedPlans.map((p) => (
-              <button
-                key={p.code}
-                onClick={() => onResident(p._data, p.code)}
+            {drafts.map((d) => (
+              <div
+                key={d.draftId}
                 style={{
-                  width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
-                  padding: "10px 14px", background: C.bg, border: `1px solid ${C.grayLight}`,
-                  borderRadius: 12, cursor: "pointer", marginBottom: 6, textAlign: "left",
-                  color: C.gray, fontFamily: "inherit",
+                  display: "flex", alignItems: "center", justifyContent: "space-between",
+                  padding: "10px 12px", background: C.bg, border: `1px solid ${C.grayLight}`,
+                  borderRadius: 10, marginBottom: 6,
                 }}
               >
-                <div>
-                  <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{p.name}</p>
-                  <p style={{ margin: 0, fontSize: 11, color: C.grayMid }}>Publicado: {p.date}</p>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: C.gray, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</p>
+                  <p style={{ margin: 0, fontSize: 10, color: C.grayMid }}>
+                    Guardado: {new Date(d.savedAt).toLocaleDateString("es-CL", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                  </p>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <p style={{ margin: 0, fontSize: 15, fontWeight: 700, color: C.green, letterSpacing: 2 }}>{p.code}</p>
-                  <p style={{ margin: 0, fontSize: 11, color: C.grayMid }}>Abrir →</p>
-                </div>
-              </button>
+                <button
+                  onClick={() => onAdmin(d._data, d.draftId)}
+                  style={{
+                    flexShrink: 0, marginLeft: 8, display: "flex", alignItems: "center", gap: 4,
+                    padding: "5px 10px", borderRadius: 8, border: "none", cursor: "pointer",
+                    background: C.blueBg, color: C.blue, fontSize: 11, fontWeight: 600, fontFamily: "inherit",
+                  }}
+                >
+                  <MapPin size={11} /> Editar
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -1498,8 +1495,8 @@ function EntryScreen({ onAdmin, onResident }: {
           <div style={{ flex: 1, height: 1, background: C.grayLight }} />
         </div>
 
-        <button className="btn-outline" onClick={onAdmin} style={{ width: "100%" }}>
-          <MapPin size={14} color={C.green} /> Soy Administrador — Crear / Editar Plan
+        <button className="btn-outline" onClick={() => onAdmin()} style={{ width: "100%" }}>
+          <MapPin size={14} color={C.green} /> Soy Administrador — Crear Plan Nuevo
         </button>
       </div>
     </div>
@@ -1511,12 +1508,15 @@ function ShareModal({ code, planName, onClose, onRegen }: {
   code: string; planName: string; onClose: () => void; onRegen: () => void;
 }) {
   const [copied, setCopied] = useState(false);
+  const shareUrl = typeof window !== "undefined"
+    ? `${window.location.origin}/dashboard?plan=${code}`
+    : `?plan=${code}`;
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(code);
+    navigator.clipboard.writeText(shareUrl);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }, [code]);
+  }, [shareUrl]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -1528,7 +1528,7 @@ function ShareModal({ code, planName, onClose, onRegen }: {
     <div
       role="dialog" aria-modal="true" aria-labelledby="share-modal-title"
       style={{
-        position: "fixed", inset: 0, zIndex: 50,
+        position: "fixed", inset: 0, zIndex: 70,
         display: "flex", alignItems: "center", justifyContent: "center",
         background: "rgba(78,82,110,0.35)", backdropFilter: "blur(6px)",
       }}
@@ -1536,7 +1536,7 @@ function ShareModal({ code, planName, onClose, onRegen }: {
     >
       <div
         className="card"
-        style={{ padding: 24, width: "100%", maxWidth: 340, margin: 16 }}
+        style={{ padding: 24, width: "100%", maxWidth: 400, margin: 16 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
@@ -1553,14 +1553,14 @@ function ShareModal({ code, planName, onClose, onRegen }: {
         </div>
 
         <div style={{
-          background: C.blueBg, border: `1px solid ${C.grayLight}`,
-          borderRadius: 14, padding: 20, textAlign: "center", marginBottom: 16,
+          background: C.greenBg, border: `1px solid ${C.green}22`,
+          borderRadius: 14, padding: "14px 16px", marginBottom: 16,
         }}>
-          <p style={{ margin: "0 0 4px", fontSize: 11, color: C.grayMid, fontWeight: 600, textTransform: "uppercase", letterSpacing: 1 }}>
-            Código de acceso
+          <p style={{ margin: "0 0 6px", fontSize: 11, color: C.green, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+            🔗 Link para residentes
           </p>
-          <p style={{ margin: 0, fontSize: 38, fontFamily: "Montserrat, monospace", fontWeight: 700, color: C.gray, letterSpacing: 8 }}>
-            {code}
+          <p style={{ margin: 0, fontSize: 11, color: C.gray, wordBreak: "break-all", lineHeight: 1.5 }}>
+            {shareUrl}
           </p>
           <p style={{ margin: "8px 0 0", fontSize: 11, color: C.grayMid }}>{planName || "Plan de Evacuación"}</p>
         </div>
@@ -1569,13 +1569,9 @@ function ShareModal({ code, planName, onClose, onRegen }: {
           background: C.bg, borderRadius: 12, padding: 14, marginBottom: 16,
           fontSize: 11, color: C.gray, lineHeight: 1.8,
         }}>
-          <p style={{ margin: "0 0 4px", fontWeight: 700 }}>👤 Para residentes:</p>
-          <p style={{ margin: 0 }}>1. Abre la app → &quot;Soy Residente&quot;</p>
-          <p style={{ margin: 0 }}>
-            2. Ingresa el código{" "}
-            <code style={{ background: C.blueBg, color: C.blue, padding: "1px 6px", borderRadius: 4, fontWeight: 700 }}>{code}</code>
-          </p>
-          <p style={{ margin: 0 }}>3. Usa ✨ Ruta IA para instrucciones personalizadas</p>
+          <p style={{ margin: "0 0 4px", fontWeight: 700 }}>👤 Para compartir con residentes:</p>
+          <p style={{ margin: 0 }}>Envía el link por WhatsApp, email o fíjalo en el cartelón del edificio.</p>
+          <p style={{ margin: "4px 0 0", color: C.grayMid }}>El residente solo hace clic → abre el plan directo.</p>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
@@ -1585,14 +1581,15 @@ function ShareModal({ code, planName, onClose, onRegen }: {
               flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
               padding: "10px", borderRadius: 12, fontSize: 13, fontWeight: 600,
               cursor: "pointer", border: "none", fontFamily: "inherit",
-              background: copied ? C.green : C.gray, color: "white", transition: "background 0.2s",
+              background: copied ? C.green : C.blue, color: "white", transition: "background 0.2s",
             }}
           >
-            {copied ? <><CheckCircle size={13} />¡Copiado!</> : <><Copy size={13} />Copiar código</>}
+            {copied ? <><CheckCircle size={13} />¡Link copiado!</> : <><Copy size={13} />Copiar link</>}
           </button>
           <button
             onClick={onRegen}
             aria-label="Regenerar código"
+            title="Generar nuevo link"
             style={{
               padding: "10px 14px", background: C.bg, border: `1px solid ${C.grayLight}`,
               borderRadius: 12, color: C.grayMid, cursor: "pointer",
@@ -1607,21 +1604,30 @@ function ShareModal({ code, planName, onClose, onRegen }: {
 }
 
 /* ════ ADMIN EDITOR ═════════════════════════════════════════════ */
-function AdminEditor({ onBack }: { onBack: () => void }) {
-  const [image, setImage]               = useState<string | null>(null);
+function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
+  onBack: () => void;
+  initialPlan?: Plan;
+  draftId?: string;
+}) {
+  const [image, setImage]               = useState<string | null>(initialPlan?.image ?? null);
   const [isViewMode, setIsViewMode]     = useState(false);
   const [emergency, setEmergency]       = useState(false);
   const [hoveredEl, setHoveredEl]       = useState<number | null>(null);
-  const [planName, setPlanName]         = useState("Mi Edificio");
+  const [planName, setPlanName]         = useState(initialPlan?.name ?? "Mi Edificio");
   const [shareCode, setShareCode]       = useState<string | null>(null);
   const [showShare, setShowShare]       = useState(false);
   const [saving, setSaving]             = useState(false);
+  const [savingDraft, setSavingDraft]   = useState(false);
+  const [draftSaved, setDraftSaved]     = useState(false);
+  const [draftId]                       = useState<string>(() => initDraftId ?? crypto.randomUUID());
   const [showCtx, setShowCtx]           = useState(false);
-  const [floors, setFloors]             = useState("1");
-  const [extraInfo, setExtraInfo]       = useState("");
-  const [blockedZones, setBlockedZones] = useState("");
-  const [mobilityNeeds, setMobilityNeeds] = useState(false);
-  const [locationFields, setLocationFields] = useState<LocationField[]>(DEFAULT_LOCATION_FIELDS);
+  const [floors, setFloors]             = useState(initialPlan?.buildingCtx?.floors ?? "1");
+  const [extraInfo, setExtraInfo]       = useState(initialPlan?.buildingCtx?.extra ?? "");
+  const [blockedZones, setBlockedZones] = useState(initialPlan?.buildingCtx?.blocked ?? "");
+  const [mobilityNeeds, setMobilityNeeds] = useState(initialPlan?.buildingCtx?.mobility ?? false);
+  const [locationFields, setLocationFields] = useState<LocationField[]>(
+    initialPlan?.buildingCtx?.locationFields ?? DEFAULT_LOCATION_FIELDS
+  );
 
   const [aiSuggestions, setAiSuggestions]     = useState<AISuggestion | null>(null);
   const [analyzingPlan, setAnalyzingPlan]     = useState(false);
@@ -1642,8 +1648,16 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
   const {
     elements, routes, activeTool, currentRoute, canvasRef,
     handleCanvasClick, finishRoute, removeElement, removeRoute,
-    selectTool, reset, addElement, addRoute,
+    selectTool, reset, addElement, addRoute, loadPlan,
   } = useMapEditor();
+
+  // Load initial plan elements/routes when editing a saved plan
+  useEffect(() => {
+    if (initialPlan?.elements || initialPlan?.routes) {
+      loadPlan(initialPlan.elements ?? [], initialPlan.routes ?? []);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const routeColor = emergency ? C.red : C.blue;
 
@@ -1767,24 +1781,64 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
 
   const publishPlan = useCallback(async (code: string) => {
     setSaving(true);
-    const data = JSON.stringify({
+    const planData = {
       name: planName, image, elements, routes,
       buildingCtx: {
         name: planName, floors, extra: extraInfo,
         blocked: blockedZones, mobility: mobilityNeeds, locationFields,
       },
       publishedAt: new Date().toISOString(),
-    });
+    };
     try {
-      storage.set(`plan:${code}`, data);
+      // Save to Supabase via API (cross-device sharing)
+      const res = await fetch("/api/plans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code, name: planName, data: planData }),
+      });
+      if (!res.ok) throw new Error("Error al guardar en servidor");
+      // Also keep a localStorage cache for quick access
+      storage.set(`plan:${code}`, JSON.stringify(planData));
       setShareCode(code);
       setShowShare(true);
     } catch (e) {
-      console.error("Error al guardar:", e);
+      console.error("Error al publicar:", e);
+      // Fallback: save only to localStorage
+      storage.set(`plan:${code}`, JSON.stringify(planData));
+      setShareCode(code);
+      setShowShare(true);
     } finally {
       setSaving(false);
     }
   }, [planName, image, elements, routes, floors, extraInfo, blockedZones, mobilityNeeds, locationFields]);
+
+  const saveDraft = useCallback(() => {
+    setSavingDraft(true);
+    const planData: Plan = {
+      name: planName, image, elements, routes,
+      buildingCtx: {
+        name: planName, floors, extra: extraInfo,
+        blocked: blockedZones, mobility: mobilityNeeds, locationFields,
+      },
+    };
+    try {
+      storage.set(`draft:${draftId}`, JSON.stringify(planData));
+      // Update drafts index
+      const indexRaw = storage.get("drafts:index");
+      const index: Array<{ draftId: string; name: string; savedAt: string }> = indexRaw
+        ? JSON.parse(indexRaw) : [];
+      const existing = index.findIndex((d) => d.draftId === draftId);
+      const entry = { draftId, name: planName, savedAt: new Date().toISOString() };
+      if (existing >= 0) index[existing] = entry; else index.unshift(entry);
+      storage.set("drafts:index", JSON.stringify(index));
+      setDraftSaved(true);
+      setTimeout(() => setDraftSaved(false), 2500);
+    } catch (e) {
+      console.error("Error guardando borrador:", e);
+    } finally {
+      setSavingDraft(false);
+    }
+  }, [draftId, planName, image, elements, routes, floors, extraInfo, blockedZones, mobilityNeeds, locationFields]);
 
   const visibleElements = useMemo(
     () => emergency ? elements.filter((el) => CRITICAL_TYPES.has(el.type)) : elements,
@@ -1805,7 +1859,7 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
   }, [reset]);
 
   return (
-    <div className="app-root" style={{ display: "flex" }}>
+    <div className="app-root" style={{ display: "flex", position: "fixed", inset: 0, zIndex: 60 }}>
       {/* SIDEBAR */}
       <nav style={{
         width: 260, flexShrink: 0, background: "white",
@@ -2049,14 +2103,34 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
             <AlertTriangle size={13} /> {emergency ? "🚨 EMERGENCIA ACTIVA" : "Modo Emergencia"}
           </button>
           <button
+            onClick={saveDraft}
+            disabled={savingDraft}
+            style={{
+              width: "100%", borderRadius: 10, display: "flex", alignItems: "center",
+              justifyContent: "center", gap: 6, padding: "8px 12px",
+              fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none",
+              fontFamily: "inherit", marginBottom: 6,
+              background: draftSaved ? C.greenBg : C.bg,
+              color: draftSaved ? C.green : C.gray,
+              transition: "background 0.3s, color 0.3s",
+            }}
+          >
+            {savingDraft
+              ? <><RefreshCw size={12} className="spin" />Guardando…</>
+              : draftSaved
+                ? <><CheckCircle size={12} />¡Borrador guardado!</>
+                : <><KeyRound size={12} />Guardar borrador</>
+            }
+          </button>
+          <button
             className="btn-primary"
             onClick={() => publishPlan(shareCode || genCode())}
             disabled={saving || !image}
             style={{ width: "100%", borderRadius: 10 }}
           >
             {saving
-              ? <><RefreshCw size={13} className="spin" />Guardando…</>
-              : <><Share2 size={13} />{shareCode ? "Actualizar y Compartir" : "Publicar y Compartir"}</>
+              ? <><RefreshCw size={13} className="spin" />Publicando…</>
+              : <><Share2 size={13} />{shareCode ? "Actualizar link" : "Publicar y compartir link"}</>
             }
           </button>
         </div>
@@ -2356,16 +2430,48 @@ function AdminEditor({ onBack }: { onBack: () => void }) {
 
 /* ════ ROOT ═════════════════════════════════════════════════════ */
 export default function EvacuacionApp() {
-  const [screen, setScreen]             = useState<"entry" | "admin" | "resident">("entry");
-  const [residentPlan, setResidentPlan] = useState<Plan | null>(null);
+  const searchParams                          = useSearchParams();
+  const [screen, setScreen]                  = useState<"entry" | "admin" | "resident">("entry");
+  const [residentPlan, setResidentPlan]      = useState<Plan | null>(null);
+  const [adminInitialPlan, setAdminInitialPlan] = useState<Plan | undefined>(undefined);
+  const [adminDraftId, setAdminDraftId]      = useState<string | undefined>(undefined);
+
+  // Auto-load plan from URL ?plan=CODE (shared link for residents)
+  useEffect(() => {
+    const code = searchParams.get("plan");
+    if (!code) return;
+    fetch(`/api/plans/${code.toUpperCase()}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((res) => {
+        if (res?.data) {
+          setResidentPlan(res.data);
+          setScreen("resident");
+        }
+      })
+      .catch(() => {});
+  }, [searchParams]);
+
+  const handleAdmin = useCallback((plan?: Plan, draftId?: string) => {
+    setAdminInitialPlan(plan);
+    setAdminDraftId(draftId);
+    setScreen("admin");
+  }, []);
 
   return (
     <>
-      {screen === "admin"    && <AdminEditor onBack={() => setScreen("entry")} />}
-      {screen === "resident" && residentPlan && <ResidentView plan={residentPlan} onBack={() => setScreen("entry")} />}
-      {screen === "entry"    && (
+      {screen === "admin" && (
+        <AdminEditor
+          onBack={() => { setAdminInitialPlan(undefined); setAdminDraftId(undefined); setScreen("entry"); }}
+          initialPlan={adminInitialPlan}
+          draftId={adminDraftId}
+        />
+      )}
+      {screen === "resident" && residentPlan && (
+        <ResidentView plan={residentPlan} onBack={() => setScreen("entry")} />
+      )}
+      {screen === "entry" && (
         <EntryScreen
-          onAdmin={() => setScreen("admin")}
+          onAdmin={handleAdmin}
           onResident={(plan) => { setResidentPlan(plan); setScreen("resident"); }}
         />
       )}
