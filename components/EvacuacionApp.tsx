@@ -1651,12 +1651,11 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
     selectTool, reset, addElement, addRoute, loadPlan,
   } = useMapEditor();
 
-  // Load initial plan elements/routes when editing a saved plan
+  // Load initial plan elements/routes when editing a saved plan (run once on mount)
   useEffect(() => {
     if (initialPlan?.elements || initialPlan?.routes) {
       loadPlan(initialPlan.elements ?? [], initialPlan.routes ?? []);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const routeColor = emergency ? C.red : C.blue;
