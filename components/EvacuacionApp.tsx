@@ -457,6 +457,9 @@ function useMapEditor() {
 
   const removeElement = useCallback((id: number) => setElements((prev) => prev.filter((e) => e.id !== id)), []);
   const removeRoute   = useCallback((id: number) => setRoutes((prev) => prev.filter((r) => r.id !== id)), []);
+  const moveElement   = useCallback((id: number, x: number, y: number) => {
+    setElements((prev) => prev.map((el) => el.id === id ? { ...el, x, y } : el));
+  }, []);;
 
   const selectTool = useCallback((toolId: string | null) => {
     setActiveTool(toolId);
@@ -482,7 +485,7 @@ function useMapEditor() {
   return {
     elements, routes, activeTool, currentRoute,
     canvasRef, handleCanvasClick, finishRoute,
-    removeElement, removeRoute, selectTool, reset, addElement, addRoute, loadPlan,
+    removeElement, removeRoute, moveElement, selectTool, reset, addElement, addRoute, loadPlan,
   };
 }
 
@@ -506,31 +509,69 @@ function MarkdownText({ text }: { text: string }) {
   );
 }
 
-function ElementPin({ el, emergency, showTooltip, onMouseEnter, onMouseLeave }: {
+function ElementPin({ el, emergency, showTooltip, onMouseEnter, onMouseLeave, onMove, getCanvasRect }: {
   el: Element; emergency: boolean; showTooltip: boolean;
   onMouseEnter: () => void; onMouseLeave: () => void;
+  onMove?: (id: number, x: number, y: number) => void;
+  getCanvasRect?: () => DOMRect | null;
 }) {
-  const tool      = TOOLS[el.type];
-  const Icon      = tool?.icon || MapPin;
+  const tool       = TOOLS[el.type];
+  const Icon       = tool?.icon || MapPin;
   const isCritical = CRITICAL_TYPES.has(el.type);
+  const isDragging  = useRef(false);
+  const [dragging, setDragging] = useState(false);
 
   if (emergency && !isCritical) return null;
 
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!onMove || !getCanvasRect) return;
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    isDragging.current = true;
+    setDragging(true);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging.current || !onMove || !getCanvasRect) return;
+    const rect = getCanvasRect();
+    if (!rect) return;
+    const x = Math.max(1, Math.min(99, ((e.clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(1, Math.min(99, ((e.clientY - rect.top) / rect.height) * 100));
+    onMove(el.id, x, y);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDragging.current) return;
+    e.stopPropagation();
+    isDragging.current = false;
+    setDragging(false);
+  };
+
   return (
-    <div style={{ position: "absolute", left: `${el.x}%`, top: `${el.y}%`, transform: "translate(-50%,-50%)", zIndex: 10 }}>
+    <div
+      style={{
+        position: "absolute", left: `${el.x}%`, top: `${el.y}%`,
+        transform: "translate(-50%,-50%)",
+        zIndex: dragging ? 20 : 10,
+        cursor: onMove ? (dragging ? "grabbing" : "grab") : "default",
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
       {emergency && isCritical && (
         <span className="ping" style={{ position: "absolute", inset: 0, borderRadius: "50%", background: tool?.color, opacity: 0.4 }} />
       )}
       <div
         className="element-pin"
         style={{ background: tool?.color || C.gray }}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
+        onMouseEnter={dragging ? undefined : onMouseEnter}
+        onMouseLeave={dragging ? undefined : onMouseLeave}
         aria-label={el.label}
       >
         <Icon size={15} color="white" />
       </div>
-      {showTooltip && (
+      {showTooltip && !dragging && (
         <div className="tooltip">
           <p style={{ margin: 0, fontWeight: 700, fontSize: 12 }}>{el.label}</p>
           {el.detail && <p style={{ margin: "3px 0 0", color: C.grayMid, fontSize: 11 }}>{el.detail}</p>}
@@ -1333,19 +1374,19 @@ function EntryScreen({ onAdmin, onResident }: {
   const [code, setCode]             = useState("");
   const [err, setErr]               = useState("");
   const [loading, setLoading]       = useState(false);
-  const [drafts, setDrafts]         = useState<Array<{ draftId: string; name: string; savedAt: string; _data: Plan }>>([]);
+  const [drafts, setDrafts] = useState<Array<{ draftId: string; name: string; savedAt: string; noImage?: boolean; _data: Plan }>>([]);
 
   // Load admin drafts from localStorage on mount
   useEffect(() => {
     try {
       const indexRaw = storage.get("drafts:index");
       if (!indexRaw) return;
-      const index: Array<{ draftId: string; name: string; savedAt: string }> = JSON.parse(indexRaw);
+      const index: Array<{ draftId: string; name: string; savedAt: string; noImage?: boolean }> = JSON.parse(indexRaw);
       const loaded = index.map((entry) => {
         const raw = storage.get(`draft:${entry.draftId}`);
         if (!raw) return null;
         return { ...entry, _data: JSON.parse(raw) as Plan };
-      }).filter(Boolean) as Array<{ draftId: string; name: string; savedAt: string; _data: Plan }>;
+      }).filter(Boolean) as Array<{ draftId: string; name: string; savedAt: string; noImage?: boolean; _data: Plan }>;
       setDrafts(loaded);
     } catch { /* ignore */ }
   }, []);
@@ -1471,7 +1512,8 @@ function EntryScreen({ onAdmin, onResident }: {
                 <div style={{ minWidth: 0 }}>
                   <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: C.gray, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.name}</p>
                   <p style={{ margin: 0, fontSize: 10, color: C.grayMid }}>
-                    Guardado: {new Date(d.savedAt).toLocaleDateString("es-CL", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    {new Date(d.savedAt).toLocaleDateString("es-CL", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                    {d.noImage && <span style={{ color: C.yellow, marginLeft: 6 }}>· sin imagen</span>}
                   </p>
                 </div>
                 <button
@@ -1603,6 +1645,171 @@ function ShareModal({ code, planName, onClose, onRegen }: {
   );
 }
 
+/* ─── Publish Review Modal ───────────────────────────────────── */
+function PublishReviewModal({
+  planName, floors, extraInfo, blockedZones, mobilityNeeds,
+  elements, routes, onConfirm, onCancel, publishing,
+}: {
+  planName: string; floors: string; extraInfo: string;
+  blockedZones: string; mobilityNeeds: boolean;
+  elements: Element[]; routes: RouteItem[];
+  onConfirm: () => void; onCancel: () => void; publishing: boolean;
+}) {
+  const counts = {
+    salidas:    elements.filter((e) => e.type === "salida").length,
+    extintores: elements.filter((e) => e.type === "extintor").length,
+    puntos:     elements.filter((e) => e.type === "punto").length,
+    mangueras:  elements.filter((e) => e.type === "manguera").length,
+  };
+
+  const warnings: string[] = [];
+  if (counts.salidas === 0)    warnings.push("No hay salidas de emergencia marcadas");
+  if (counts.puntos === 0)     warnings.push("No hay puntos de encuentro marcados");
+  if (routes.length === 0)     warnings.push("No hay rutas de evacuación dibujadas");
+
+  const TYPE_INFO = [
+    { key: "salidas",    label: "Salidas",              icon: "🚪", color: C.green,  bg: C.greenBg  },
+    { key: "extintores", label: "Extintores",           icon: "🧯", color: C.red,    bg: C.redBg    },
+    { key: "puntos",     label: "Puntos de Encuentro",  icon: "👥", color: C.yellow, bg: C.yellowBg },
+    { key: "mangueras",  label: "Mangueras",            icon: "💧", color: C.blue,   bg: C.blueBg   },
+  ] as const;
+
+  return (
+    <div
+      role="dialog" aria-modal="true"
+      style={{
+        position: "fixed", inset: 0, zIndex: 70,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        background: "rgba(78,82,110,0.40)", backdropFilter: "blur(6px)", padding: 16,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        className="card"
+        style={{ width: "100%", maxWidth: 500, maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{ padding: "18px 20px", borderBottom: `1px solid ${C.grayLight}`, display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+          <div style={{ width: 38, height: 38, borderRadius: 12, background: C.greenBg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <Share2 size={18} color={C.green} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Verificar antes de publicar</p>
+            <p style={{ margin: 0, fontSize: 11, color: C.grayMid }}>Revisa que todo esté correcto</p>
+          </div>
+          <button className="icon-btn" onClick={onCancel}><X size={16} /></button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* Warnings */}
+          {warnings.length > 0 && (
+            <div style={{ background: C.yellowBg, borderRadius: 12, padding: "12px 16px", border: `1px solid ${C.yellow}55` }}>
+              <p style={{ margin: "0 0 6px", fontSize: 12, fontWeight: 700, color: "#92400E" }}>⚠️ Recomendaciones</p>
+              {warnings.map((w, i) => (
+                <p key={i} style={{ margin: "3px 0", fontSize: 11, color: "#92400E" }}>• {w}</p>
+              ))}
+              <p style={{ margin: "8px 0 0", fontSize: 10, color: C.grayMid }}>Puedes publicar igual, pero considera completar estos elementos.</p>
+            </div>
+          )}
+
+          {/* Building config */}
+          <div>
+            <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: C.grayMid, textTransform: "uppercase", letterSpacing: 0.5 }}>Configuración del edificio</p>
+            <div style={{ background: C.bg, borderRadius: 12, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: C.grayMid }}>Nombre</span>
+                <span style={{ fontWeight: 600, color: C.gray }}>{planName || "—"}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: C.grayMid }}>Pisos</span>
+                <span style={{ fontWeight: 600, color: C.gray }}>{floors || "—"}</span>
+              </div>
+              {extraInfo && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span style={{ color: C.grayMid, flexShrink: 0, marginRight: 8 }}>Info adicional</span>
+                  <span style={{ fontWeight: 500, color: C.gray, textAlign: "right" }}>{extraInfo}</span>
+                </div>
+              )}
+              {blockedZones && (
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span style={{ color: C.grayMid, flexShrink: 0, marginRight: 8 }}>Zonas bloqueadas</span>
+                  <span style={{ fontWeight: 500, color: C.red, textAlign: "right" }}>{blockedZones}</span>
+                </div>
+              )}
+              {mobilityNeeds && (
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.blue }}>
+                  <CheckCircle size={12} /><span>Incluye indicaciones de movilidad reducida</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Element counts */}
+          <div>
+            <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: C.grayMid, textTransform: "uppercase", letterSpacing: 0.5 }}>Elementos en el plano</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {TYPE_INFO.map(({ key, label, icon, color, bg }) => {
+                const count = counts[key as keyof typeof counts];
+                const missing = (key === "salidas" || key === "puntos") && count === 0;
+                return (
+                  <div key={key} style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    background: missing ? "#FFF5F5" : bg,
+                    borderRadius: 10, padding: "10px 12px",
+                    border: `1px solid ${missing ? C.red + "33" : "transparent"}`,
+                  }}>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: missing ? C.red : color }}>{count}</span>
+                    <div>
+                      <p style={{ margin: 0, fontSize: 11, fontWeight: 600, color: C.gray }}>{icon} {label}</p>
+                      {missing && <p style={{ margin: 0, fontSize: 10, color: C.red }}>Recomendado</p>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{
+              display: "flex", alignItems: "center", gap: 10, marginTop: 8,
+              background: routes.length === 0 ? "#FFF5F5" : C.blueBg,
+              borderRadius: 10, padding: "10px 12px",
+              border: `1px solid ${routes.length === 0 ? C.red + "33" : "transparent"}`,
+            }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: routes.length === 0 ? C.red : C.blue }}>{routes.length}</span>
+              <div>
+                <p style={{ margin: 0, fontSize: 11, fontWeight: 600, color: C.gray }}>➡️ Rutas de evacuación</p>
+                {routes.length === 0 && <p style={{ margin: 0, fontSize: 10, color: C.red }}>Recomendado</p>}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background: C.greenBg, borderRadius: 10, padding: "10px 14px", fontSize: 11, color: C.green, lineHeight: 1.5 }}>
+            ✅ Una vez publicado, los residentes podrán acceder al plan mediante el link que se generará.
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: "14px 20px", borderTop: `1px solid ${C.grayLight}`, display: "flex", gap: 10, flexShrink: 0 }}>
+          <button className="btn-outline" onClick={onCancel} style={{ flex: 1 }}>
+            <ArrowLeft size={14} /> Seguir editando
+          </button>
+          <button
+            className="btn-primary"
+            onClick={onConfirm}
+            disabled={publishing}
+            style={{ flex: 2, borderRadius: 12, background: C.green }}
+          >
+            {publishing
+              ? <><RefreshCw size={13} className="spin" />Publicando…</>
+              : <><Share2 size={13} />Publicar y compartir link</>
+            }
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ════ ADMIN EDITOR ═════════════════════════════════════════════ */
 function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
   onBack: () => void;
@@ -1617,9 +1824,11 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
   const [shareCode, setShareCode]       = useState<string | null>(null);
   const [showShare, setShowShare]       = useState(false);
   const [saving, setSaving]             = useState(false);
-  const [savingDraft, setSavingDraft]   = useState(false);
-  const [draftSaved, setDraftSaved]     = useState(false);
-  const [draftId]                       = useState<string>(() => initDraftId ?? crypto.randomUUID());
+  const [savingDraft, setSavingDraft]     = useState(false);
+  const [draftSaved, setDraftSaved]       = useState(false);
+  const [draftNoImage, setDraftNoImage]   = useState(false);
+  const [showPublishReview, setShowPublishReview] = useState(false);
+  const [draftId]                         = useState<string>(() => initDraftId ?? crypto.randomUUID());
   const [showCtx, setShowCtx]           = useState(false);
   const [floors, setFloors]             = useState(initialPlan?.buildingCtx?.floors ?? "1");
   const [extraInfo, setExtraInfo]       = useState(initialPlan?.buildingCtx?.extra ?? "");
@@ -1647,9 +1856,11 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
   const pdfRef  = useRef<HTMLInputElement>(null);
   const {
     elements, routes, activeTool, currentRoute, canvasRef,
-    handleCanvasClick, finishRoute, removeElement, removeRoute,
+    handleCanvasClick, finishRoute, removeElement, removeRoute, moveElement,
     selectTool, reset, addElement, addRoute, loadPlan,
   } = useMapEditor();
+
+  const getCanvasRect = useCallback(() => canvasRef.current?.getBoundingClientRect() ?? null, [canvasRef]);
 
   // Load initial plan elements/routes when editing a saved plan (run once on mount)
   useEffect(() => {
@@ -1813,25 +2024,35 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
 
   const saveDraft = useCallback(() => {
     setSavingDraft(true);
-    const planData: Plan = {
-      name: planName, image, elements, routes,
+    setDraftNoImage(false);
+    const basePlan: Plan = {
+      name: planName, elements, routes,
       buildingCtx: {
         name: planName, floors, extra: extraInfo,
         blocked: blockedZones, mobility: mobilityNeeds, locationFields,
       },
     };
+    // Try saving with image; if > 2 MB, save without it to avoid QuotaExceededError
+    const withImage = JSON.stringify({ ...basePlan, image });
+    let noImgSave = false;
+    if (withImage.length > 2_000_000) {
+      noImgSave = true;
+      storage.set(`draft:${draftId}`, JSON.stringify({ ...basePlan, image: null }));
+    } else {
+      storage.set(`draft:${draftId}`, withImage);
+    }
     try {
-      storage.set(`draft:${draftId}`, JSON.stringify(planData));
       // Update drafts index
       const indexRaw = storage.get("drafts:index");
-      const index: Array<{ draftId: string; name: string; savedAt: string }> = indexRaw
+      const index: Array<{ draftId: string; name: string; savedAt: string; noImage?: boolean }> = indexRaw
         ? JSON.parse(indexRaw) : [];
       const existing = index.findIndex((d) => d.draftId === draftId);
-      const entry = { draftId, name: planName, savedAt: new Date().toISOString() };
+      const entry = { draftId, name: planName, savedAt: new Date().toISOString(), noImage: noImgSave };
       if (existing >= 0) index[existing] = entry; else index.unshift(entry);
       storage.set("drafts:index", JSON.stringify(index));
       setDraftSaved(true);
-      setTimeout(() => setDraftSaved(false), 2500);
+      if (noImgSave) setDraftNoImage(true);
+      setTimeout(() => { setDraftSaved(false); setDraftNoImage(false); }, 3500);
     } catch (e) {
       console.error("Error guardando borrador:", e);
     } finally {
@@ -2108,7 +2329,7 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
               width: "100%", borderRadius: 10, display: "flex", alignItems: "center",
               justifyContent: "center", gap: 6, padding: "8px 12px",
               fontSize: 12, fontWeight: 600, cursor: "pointer", border: "none",
-              fontFamily: "inherit", marginBottom: 6,
+              fontFamily: "inherit", marginBottom: 2,
               background: draftSaved ? C.greenBg : C.bg,
               color: draftSaved ? C.green : C.gray,
               transition: "background 0.3s, color 0.3s",
@@ -2121,16 +2342,23 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
                 : <><KeyRound size={12} />Guardar borrador</>
             }
           </button>
+          {draftNoImage && (
+            <p style={{ fontSize: 10, color: C.yellow, textAlign: "center", margin: "0 0 4px", lineHeight: 1.4 }}>
+              ⚠️ Imagen no guardada (muy grande). Recárgala al retomar.
+            </p>
+          )}
+          {!draftNoImage && draftSaved && (
+            <p style={{ fontSize: 10, color: C.grayMid, textAlign: "center", margin: "0 0 4px" }}>
+              Vuelve al inicio para continuar después.
+            </p>
+          )}
           <button
             className="btn-primary"
-            onClick={() => publishPlan(shareCode || genCode())}
+            onClick={() => setShowPublishReview(true)}
             disabled={saving || !image}
             style={{ width: "100%", borderRadius: 10 }}
           >
-            {saving
-              ? <><RefreshCw size={13} className="spin" />Publicando…</>
-              : <><Share2 size={13} />{shareCode ? "Actualizar link" : "Publicar y compartir link"}</>
-            }
+            <Share2 size={13} />{shareCode ? "Actualizar link" : "Publicar y compartir link"}
           </button>
         </div>
       </nav>
@@ -2391,6 +2619,8 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
                   showTooltip={hoveredEl === el.id}
                   onMouseEnter={() => setHoveredEl(el.id)}
                   onMouseLeave={() => setHoveredEl(null)}
+                  onMove={!isViewMode ? moveElement : undefined}
+                  getCanvasRect={!isViewMode ? getCanvasRect : undefined}
                 />
               ))}
             </div>
@@ -2398,6 +2628,16 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
         )}
       </main>
 
+      {showPublishReview && (
+        <PublishReviewModal
+          planName={planName} floors={floors} extraInfo={extraInfo}
+          blockedZones={blockedZones} mobilityNeeds={mobilityNeeds}
+          elements={elements} routes={routes}
+          publishing={saving}
+          onConfirm={() => { setShowPublishReview(false); publishPlan(shareCode || genCode()); }}
+          onCancel={() => setShowPublishReview(false)}
+        />
+      )}
       {showShare && shareCode && (
         <ShareModal
           code={shareCode} planName={planName}
