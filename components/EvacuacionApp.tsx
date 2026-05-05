@@ -1367,11 +1367,12 @@ function ResidentView({ plan, onBack }: { plan: Plan; onBack: () => void }) {
 }
 
 /* ════ ENTRY SCREEN ═════════════════════════════════════════════ */
-function EntryScreen({ onAdmin, onResident }: {
+function EntryScreen({ onAdmin, onResident, initialCode = "" }: {
   onAdmin: (plan?: Plan, draftId?: string) => void;
   onResident: (plan: Plan, code: string) => void;
+  initialCode?: string;
 }) {
-  const [code, setCode]             = useState("");
+  const [code, setCode]             = useState(initialCode);
   const [err, setErr]               = useState("");
   const [loading, setLoading]       = useState(false);
   const [drafts, setDrafts] = useState<Array<{ draftId: string; name: string; savedAt: string; noImage?: boolean; _data: Plan }>>([]);
@@ -2670,24 +2671,33 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
 /* ════ ROOT ═════════════════════════════════════════════════════ */
 export default function EvacuacionApp() {
   const searchParams                          = useSearchParams();
-  const [screen, setScreen]                  = useState<"entry" | "admin" | "resident">("entry");
+  const [screen, setScreen]                  = useState<"entry" | "admin" | "resident" | "loading">("entry");
   const [residentPlan, setResidentPlan]      = useState<Plan | null>(null);
   const [adminInitialPlan, setAdminInitialPlan] = useState<Plan | undefined>(undefined);
   const [adminDraftId, setAdminDraftId]      = useState<string | undefined>(undefined);
+  const [urlCode, setUrlCode]                = useState("");
 
   // Auto-load plan from URL ?plan=CODE (shared link for residents)
   useEffect(() => {
-    const code = searchParams.get("plan");
-    if (!code) return;
-    fetch(`/api/plans/${code.toUpperCase()}`)
+    const raw = searchParams.get("plan");
+    if (!raw) return;
+    const code = raw.toUpperCase();
+    setUrlCode(code);
+    setScreen("loading");
+
+    const applyPlan = (plan: Plan) => { setResidentPlan(plan); setScreen("resident"); };
+    const fallback  = () => {
+      // Try localStorage cache (same device / same browser)
+      const cached = storage.get(`plan:${code}`);
+      if (cached) { try { applyPlan(JSON.parse(cached)); return; } catch { /* ignore */ } }
+      // Not found anywhere: show entry screen with code pre-filled so user can retry
+      setScreen("entry");
+    };
+
+    fetch(`/api/plans/${code}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((res) => {
-        if (res?.data) {
-          setResidentPlan(res.data);
-          setScreen("resident");
-        }
-      })
-      .catch(() => {});
+      .then((res) => { if (res?.data) { applyPlan(res.data); } else { fallback(); } })
+      .catch(fallback);
   }, [searchParams]);
 
   const handleAdmin = useCallback((plan?: Plan, draftId?: string) => {
@@ -2698,6 +2708,22 @@ export default function EvacuacionApp() {
 
   return (
     <>
+      {screen === "loading" && (
+        <div style={{
+          position: "fixed", inset: 0, zIndex: 60,
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          background: "#F8FAFC", gap: 16,
+        }}>
+          <div style={{
+            width: 60, height: 60, borderRadius: 18, background: "#E8F8F1",
+            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 30,
+          }}>🏢</div>
+          <Loader2 size={24} color="#4CBF8C" className="spin" />
+          <p style={{ margin: 0, fontSize: 13, color: "#9CA3AF", fontWeight: 500 }}>
+            Cargando plan de evacuación…
+          </p>
+        </div>
+      )}
       {screen === "admin" && (
         <AdminEditor
           onBack={() => { setAdminInitialPlan(undefined); setAdminDraftId(undefined); setScreen("entry"); }}
@@ -2710,6 +2736,7 @@ export default function EvacuacionApp() {
       )}
       {screen === "entry" && (
         <EntryScreen
+          initialCode={urlCode}
           onAdmin={handleAdmin}
           onResident={(plan) => { setResidentPlan(plan); setScreen("resident"); }}
         />
