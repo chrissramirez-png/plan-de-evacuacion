@@ -7,9 +7,9 @@ const ALWAYS_PUBLIC = ["/login", "/auth/callback", "/auth/confirm"];
 // Rutas públicas del Plan de Evacuación
 // Estas rutas son accesibles sin login (landing pages, vistas publicas, etc.)
 const PUBLIC_ROUTES = [
-  "/public", // Paginas bajo app/(public)/
-  "/docs", // Documentacion publica
-  // "/otra-ruta-publica",
+  "/public",      // Paginas bajo app/(public)/public/
+  "/docs",        // Documentacion publica
+  "/evacuacion",  // App principal — accesible para residentes y admins sin login
 ];
 
 export async function middleware(request: NextRequest) {
