@@ -6,6 +6,7 @@
   "visibility": "public",
   "owner": "chriss.ramirez@comunidadfeliz.cl",
   "publicAuth": false,
+  "publicRoutes": ["/evacuacion"],
   "supabase": {
     "rls_enabled": true,
     "migration": "migrations/001_initial.sql"

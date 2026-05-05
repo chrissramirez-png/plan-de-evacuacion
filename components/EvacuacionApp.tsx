@@ -1417,7 +1417,7 @@ function EntryScreen({ onAdmin, onResident }: {
   return (
     <div className="app-root" style={{
       display: "flex", alignItems: "center", justifyContent: "center",
-      padding: 24, position: "relative", overflow: "hidden",
+      padding: 24, position: "fixed", inset: 0, zIndex: 60, overflow: "hidden",
     }}>
       <div style={{
         position: "absolute", top: -80, right: -80,
@@ -1551,8 +1551,8 @@ function ShareModal({ code, planName, onClose, onRegen }: {
 }) {
   const [copied, setCopied] = useState(false);
   const shareUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/dashboard?plan=${code}`
-    : `?plan=${code}`;
+    ? `${window.location.origin}/evacuacion?plan=${code}`
+    : `/evacuacion?plan=${code}`;
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(shareUrl);
