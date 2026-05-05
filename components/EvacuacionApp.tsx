@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useCallback, useMemo, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   Flame, Droplets, DoorOpen, Users, Route, Eye, EyeOff,
   AlertTriangle, X, MapPin, CheckCircle, Copy,
@@ -2670,7 +2669,6 @@ function AdminEditor({ onBack, initialPlan, draftId: initDraftId }: {
 
 /* ════ ROOT ═════════════════════════════════════════════════════ */
 export default function EvacuacionApp() {
-  const searchParams                          = useSearchParams();
   const [screen, setScreen]                  = useState<"entry" | "admin" | "resident" | "loading">("entry");
   const [residentPlan, setResidentPlan]      = useState<Plan | null>(null);
   const [adminInitialPlan, setAdminInitialPlan] = useState<Plan | undefined>(undefined);
@@ -2678,27 +2676,29 @@ export default function EvacuacionApp() {
   const [urlCode, setUrlCode]                = useState("");
 
   // Auto-load plan from URL ?plan=CODE (shared link for residents)
+  // Uses window.location.search directly to avoid SSR/hydration timing issues with useSearchParams()
   useEffect(() => {
-    const raw = searchParams.get("plan");
+    const raw = new URLSearchParams(window.location.search).get("plan");
     if (!raw) return;
     const code = raw.toUpperCase();
     setUrlCode(code);
     setScreen("loading");
 
     const applyPlan = (plan: Plan) => { setResidentPlan(plan); setScreen("resident"); };
-    const fallback  = () => {
-      // Try localStorage cache (same device / same browser)
+    const tryLocalStorage = () => {
       const cached = storage.get(`plan:${code}`);
-      if (cached) { try { applyPlan(JSON.parse(cached)); return; } catch { /* ignore */ } }
-      // Not found anywhere: show entry screen with code pre-filled so user can retry
-      setScreen("entry");
+      if (cached) { try { applyPlan(JSON.parse(cached)); return true; } catch { /* ignore */ } }
+      return false;
     };
 
     fetch(`/api/plans/${code}`)
       .then((r) => r.ok ? r.json() : null)
-      .then((res) => { if (res?.data) { applyPlan(res.data); } else { fallback(); } })
-      .catch(fallback);
-  }, [searchParams]);
+      .then((res) => {
+        if (res?.data) { applyPlan(res.data); return; }
+        if (!tryLocalStorage()) setScreen("entry");
+      })
+      .catch(() => { if (!tryLocalStorage()) setScreen("entry"); });
+  }, []);
 
   const handleAdmin = useCallback((plan?: Plan, draftId?: string) => {
     setAdminInitialPlan(plan);
