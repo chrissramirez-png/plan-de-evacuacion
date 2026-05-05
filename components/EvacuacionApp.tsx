@@ -1551,14 +1551,20 @@ function ShareModal({ code, planName, onClose, onRegen }: {
 }) {
   const [copied, setCopied] = useState(false);
   const shareUrl = typeof window !== "undefined"
-    ? `${window.location.origin}/evacuacion?plan=${code}`
-    : `/evacuacion?plan=${code}`;
+    ? `${window.location.origin}/evacuacion`
+    : `/evacuacion`;
+
+  const shareMessage =
+    `🏢 Plan de Evacuación${planName ? ` — ${planName}` : ""}\n\n` +
+    `Ingresa al siguiente link y usa el código para ver el plan:\n` +
+    `🔗 ${shareUrl}\n` +
+    `🔑 Código: ${code}`;
 
   const handleCopy = useCallback(() => {
-    navigator.clipboard.writeText(shareUrl);
+    navigator.clipboard.writeText(shareMessage);
     setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  }, [shareUrl]);
+    setTimeout(() => setCopied(false), 2500);
+  }, [shareMessage]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
@@ -1578,7 +1584,7 @@ function ShareModal({ code, planName, onClose, onRegen }: {
     >
       <div
         className="card"
-        style={{ padding: 24, width: "100%", maxWidth: 400, margin: 16 }}
+        style={{ padding: 24, width: "100%", maxWidth: 420, margin: 16 }}
         onClick={(e) => e.stopPropagation()}
       >
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
@@ -1589,22 +1595,42 @@ function ShareModal({ code, planName, onClose, onRegen }: {
             }}>
               <Share2 size={16} color={C.green} />
             </div>
-            <p id="share-modal-title" style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Plan Publicado</p>
+            <p id="share-modal-title" style={{ margin: 0, fontSize: 14, fontWeight: 700 }}>Plan Publicado ✅</p>
           </div>
           <button className="icon-btn" onClick={onClose} aria-label="Cerrar"><X size={16} /></button>
         </div>
 
+        {/* Código destacado */}
         <div style={{
-          background: C.greenBg, border: `1px solid ${C.green}22`,
-          borderRadius: 14, padding: "14px 16px", marginBottom: 16,
+          background: C.greenBg, border: `1.5px solid ${C.green}44`,
+          borderRadius: 14, padding: "14px 16px", marginBottom: 12,
+          display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12,
         }}>
-          <p style={{ margin: "0 0 6px", fontSize: 11, color: C.green, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
-            🔗 Link para residentes
+          <div>
+            <p style={{ margin: "0 0 2px", fontSize: 10, color: C.green, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>
+              Código del plan
+            </p>
+            <p style={{ margin: 0, fontSize: 28, fontWeight: 700, color: C.gray, letterSpacing: 6, fontFamily: "monospace" }}>
+              {code}
+            </p>
+          </div>
+          <div style={{ fontSize: 32 }}>🔑</div>
+        </div>
+
+        {/* Mensaje listo para copiar */}
+        <div style={{
+          background: C.bg, border: `1px solid ${C.grayLight}`,
+          borderRadius: 12, padding: "12px 14px", marginBottom: 16,
+        }}>
+          <p style={{ margin: "0 0 8px", fontSize: 11, fontWeight: 700, color: C.grayMid }}>
+            📋 Mensaje listo para enviar:
           </p>
-          <p style={{ margin: 0, fontSize: 11, color: C.gray, wordBreak: "break-all", lineHeight: 1.5 }}>
-            {shareUrl}
-          </p>
-          <p style={{ margin: "8px 0 0", fontSize: 11, color: C.grayMid }}>{planName || "Plan de Evacuación"}</p>
+          <pre style={{
+            margin: 0, fontSize: 11, color: C.gray, lineHeight: 1.7,
+            whiteSpace: "pre-wrap", fontFamily: "inherit",
+          }}>
+            {shareMessage}
+          </pre>
         </div>
 
         <div style={{
@@ -1612,8 +1638,8 @@ function ShareModal({ code, planName, onClose, onRegen }: {
           fontSize: 11, color: C.gray, lineHeight: 1.8,
         }}>
           <p style={{ margin: "0 0 4px", fontWeight: 700 }}>👤 Para compartir con residentes:</p>
-          <p style={{ margin: 0 }}>Envía el link por WhatsApp, email o fíjalo en el cartelón del edificio.</p>
-          <p style={{ margin: "4px 0 0", color: C.grayMid }}>El residente solo hace clic → abre el plan directo.</p>
+          <p style={{ margin: 0 }}>Copia el mensaje y envíalo por WhatsApp o email.</p>
+          <p style={{ margin: "4px 0 0", color: C.grayMid }}>El residente ingresa al link e introduce el código para ver el plan.</p>
         </div>
 
         <div style={{ display: "flex", gap: 8 }}>
@@ -1626,7 +1652,7 @@ function ShareModal({ code, planName, onClose, onRegen }: {
               background: copied ? C.green : C.blue, color: "white", transition: "background 0.2s",
             }}
           >
-            {copied ? <><CheckCircle size={13} />¡Link copiado!</> : <><Copy size={13} />Copiar link</>}
+            {copied ? <><CheckCircle size={13} />¡Mensaje copiado!</> : <><Copy size={13} />Copiar mensaje</>}
           </button>
           <button
             onClick={onRegen}
